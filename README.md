@@ -15,8 +15,9 @@ figures, plans campaigns with real metrics, and hands off anything that writes.
 **It is the specification, the knowledge base and the test tooling.** Versioned data describing every
 screen, metric, capability and gate, plus the validators that keep that description honest.
 
-**It is not the service.** No FastAPI app lives here yet. When it does (stage S2) it will consume
-this repo as its source of truth rather than replace it.
+**It is also the service**, in `service/`, as of S2. The FastAPI app consumes the ontology directly
+rather than duplicating it — a change to a metric definition and the code that reads it belong in
+one commit and one review.
 
 That split is deliberate. The hard part of this product was never the chat loop — it is knowing what
 "utilisation" means on which screen, which of four things called "reach" the user is asking about,
@@ -44,6 +45,7 @@ one *is* and can explain it precisely while being structurally unable to call it
 ## Layout
 
 ```
+service/           the FastAPI app — chat, SSE, the Gemini adapter, the loader
 ontology/          12 screens · 94 metrics · 20 form fields · 5 approval transitions
   schema/          JSON Schema the screens are validated against
   screens/         one YAML per dashboard screen — the backbone
@@ -95,6 +97,42 @@ python tools/render_kb.py --check       # kb/generated/ is not stale
 ```
 
 All five must pass. CI runs exactly these on every push and pull request.
+
+### Running the service
+
+```bash
+pip install -r service/requirements.txt
+cp .env.example .env            # then fill GEMINI_API_KEY and the model ids
+python tools/list_models.py --probe    # what your key can reach, and the real embed width
+
+cd service
+python -m uvicorn genie.main:app --reload --port 9030
+python -m pytest tests -q       # 18 tests, no API key needed
+```
+
+`GET /healthz` reports the loaded ontology, the configured model, session count and — the thing
+you will actually want — **whether the BFF token has expired**, since QA tokens live five minutes.
+
+```bash
+curl -N -X POST http://127.0.0.1:9030/v1/genie/chat   -H 'Content-Type: application/json'   -d '{"message":"what is my wallet balance",
+       "ui_context":{"screen":"command_centre","role":"AD_PARTNER_ADMIN"}}'
+```
+
+**With no `GEMINI_API_KEY` the service still starts** and answers through a stub responder that says
+it is a stub. That is deliberate: the transport has to be testable without a third party, or CI
+depends on someone else's uptime.
+
+### Database
+
+The target is the **QA pgvector on EC2**, reached over an SSH tunnel:
+
+```bash
+ssh -i /path/to/adgrid-qa.pem -N -L 5435:localhost:5435 ec2-user@<QA_EC2_IP>
+```
+
+`docker-compose.yml` is a fallback for when the tunnel is down, on port **5436** — never 5435, or a
+container would hold the port the tunnel needs and the DSN would connect to the wrong database
+without erroring.
 
 ### The tools
 
