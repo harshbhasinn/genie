@@ -49,3 +49,8 @@ desktop.ini
 *.log
 scratch/
 tmp/
+
+# service
+service/.pytest_cache/
+service/**/__pycache__/
+*.pem

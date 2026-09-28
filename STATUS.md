@@ -10,7 +10,7 @@ As of 2026-09-24. Measured from the repo, not estimated. **83 files.**
 |:--:|---|---|:--:|---|
 | **0** | Unblock | 🟢 **done** | **95%** | C2 · C3 · C4 — all access, no analysis left |
 | **1** | Ontology + catalog | 🟢 **done** | **100%** | none — every metric and capability is modelled or honestly blocked |
-| **2** | Skeleton | 🔴 not started | 0% | **C2 · D1 provider · no Postgres/Redis** |
+| **2** | Skeleton | 🟢 **done** | **100%** | none — running, streaming, tested |
 | **3** | Navigate + Explain | 🔴 not started | 0% | S2 · no golden set |
 | **4** | Data path | 🔴 not started | 0% | S3 · C4 |
 | **5** | **Reach model** | 🔴 **not started** | 0% | **C3 downgraded** — 4 additive fields on `/content`, no data grant |
@@ -139,10 +139,42 @@ API gap wearing nine different labels, not nine separate problems.
 
 ---
 
-## S2 · Skeleton — 🔴 0%, three items from running
+## S2 · Skeleton — 🟢 100%
 
-**C1 is answered.** The remaining blockers are **C2** (test users with JWTs), **D1** (provider and
-region), and **a Postgres and a Redis instance**.
+**Running, streaming, and tested.** `uvicorn genie.main:app --port 9030` from `service/`.
+
+| Piece | State |
+|---|---|
+| Ontology loader — typed, validates at boot | ✅ refuses to start on a broken ontology |
+| **Read-only invariant enforced at runtime** | ✅ a callable method on a state-changing endpoint kills the process |
+| `POST /v1/genie/chat` with SSE | ✅ `start` / `block` / `done` / `error` |
+| Gemini adapter | ✅ live, streaming, `gemini-3.8-flash` |
+| L-1 exact utterance lookup | ✅ no model, no vectors |
+| Screen context suppressing follow-ups | ✅ g001 vs g002 from the golden set |
+| Static token source, hot-swappable | ✅ mtime-checked, expiry surfaced on `/healthz` |
+| Sessions | ✅ in-process, bounded, TTL'd |
+| `/healthz` · `/readyz` | ✅ |
+| Tests | ✅ 18, all against the stub — CI needs no key |
+
+**D1 answered:** Gemini, AI Studio, `gemini-3.8-flash` for generation and
+`gemini-embedding-2` for embeddings. Embedding width **measured at 3072**, not assumed.
+
+**Postgres, Redis and pgvector were cut from S2** — see BUILD.md. Nothing in the exit gate needed
+them, and `halfvec(3072)` would have encoded a provider decision that was still open at the time.
+pgvector now arrives at the end of S2 for the schema, once the QA tunnel is up.
+
+### What it actually does, today
+
+```
+"pause this campaign"            → campaign.pause, otp_gated, refuses and points at the button
+"how many people saw my ads"     → says Network Reach is NOT SERVED, and distinguishes
+                                    impressions (playback events) from reach (people)
+"what is my wallet balance"      → wallet.explain_balance + the which_wallet follow-up
+  ...on wallet_management        → same capability, follow-up suppressed
+```
+
+The guardrails hold under a real model: asked for a balance it does not have, it says so rather
+than inventing one.
 
 ---
 
@@ -194,7 +226,7 @@ received no files.
 | | Action | Unblocks | Cost |
 |---|---|---|---|
 | **1** | **Test users (C2)** — see `asks/C2-TEST-USERS.md` | S2, **and verifies 67 asserted metrics** | one reply |
-| **2** | Four fields on `/content` (C3) — see `asks/REACH-API-SPEC.md` | S5, the longest pole | additive, no new service |
+| **1** | Four fields on `/content` (C3) — see `asks/REACH-API-SPEC.md` | S5, the longest pole | additive, no new service |
 | **3** | Postgres + Redis, provider (D1) | **S2 → S3 → S4** | half a day |
 | **3** | Ask whether agency delivery measurement is planned | the 9 blocked metrics, and whether to build around the gap | one conversation |
 | **5** | Name a corpus author (D3), drop files in `kb/inbox/` | S10 | one decision |

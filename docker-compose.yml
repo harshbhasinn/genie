@@ -1,0 +1,37 @@
+# OPTIONAL fallback. The default target is the QA pgvector on EC2, reached over
+# an SSH tunnel — see README "Database". This exists for two narrow cases:
+#
+#   1. The tunnel is down and you want to keep working.
+#   2. You are about to do something destructive enough that you would rather not
+#      do it on the instance your partner is also using.
+#
+#   docker compose up -d
+#   docker compose down          # stop, keep data
+#   docker compose down -v       # stop, DROP the volume (full reset)
+#
+# Note the port: 5436, NOT 5435. The QA tunnel binds 5435 locally, and a container
+# holding that port would stop the tunnel opening — which is a confusing failure,
+# because the DSN would still connect, just to the wrong database.
+
+services:
+  pgvector:
+    image: pgvector/pgvector:pg17
+    container_name: genie-pgvector
+    restart: unless-stopped
+    ports:
+      - "5436:5432"
+    environment:
+      POSTGRES_DB: genie
+      POSTGRES_USER: genie
+      # Local dev only. The real password lives in .env for the QA instance.
+      POSTGRES_PASSWORD: genie_local_dev
+    volumes:
+      - genie_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U genie -d genie"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  genie_pgdata:
