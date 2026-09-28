@@ -1,0 +1,213 @@
+screen:
+  id: brand_management
+  kind: screen
+  title: Brand Management
+  route: /brands/{brandId}
+  nav_label: Brand Management
+  audience: [AD_PARTNER_ADMIN, CAMPAIGN_MANAGER]
+  source_frame: "Agency Admin Dashboard (1.5).docx - Brand Management (image3)"
+  purpose: >
+    The brands beneath this agency, and everything about one of them - its summary, where its
+    screens are, its recent campaigns, and the people who own it. Campaigns and the creative
+    library are both reached from here, not from the top nav.
+  entities: [brand, campaign, creative, device]
+  related_screens: [command_centre, launch_campaign, campaign_detail, creative_library]
+
+  filters:
+    - id: period
+      label: Brand Summary period
+      default: last_7_days
+      unset_means: "Never unset. Genie must echo the resolved window."
+
+  sections:
+    - id: brand_list
+      label: Brand list
+      subtitle: "Left rail. Each row: brand name, campaign count, billings."
+    - id: brand_summary
+      label: Brand Summary
+      metrics: [screens_used, brand_live_campaigns, brand_daily_impressions,
+                brand_audience_reach_per_day, brand_booked_revenue]
+    - id: screen_distribution
+      label: Screen Distribution by Location
+      subtitle: "Donut per city with a screen count."
+      metrics: [brand_screens_by_city]
+    - id: recent_campaigns
+      label: Recent Campaigns
+      subtitle: "Name, status, flight dates, delivery bar, impressions, value."
+    - id: company_information
+      label: Company Information
+    - id: brand_manager_details
+      label: Brand Manager Details
+    - id: assigned_campaign_details
+      label: Assigned Campaign Details
+
+  metrics:
+
+    - id: screens_used
+      source:
+        api: "GET /api/v1/clients/{brandId}/analytics"
+        method: GET
+        scope_key: client_id
+        field: "screensUsed"
+      label: Screen Used
+      unit: count
+      freshness: unknown
+      deck_value: "4,000"
+      gotchas:
+        - >
+          POLICY 2026-09-24 - resolved in favour of the API/backend over the design. See RESOLUTION-POLICY.md.
+          Screens in use - screens carrying at least one live campaign for this brand.
+        - >
+          R8 - a sixth term for screens, alongside Live Screens, Owned Screens, Active Screens,
+          Total Screens and Targeting-capable screens. Proposed canonical name is "Screens in use"
+          = screens carrying at least one of this brand's live campaigns.
+      status: pending_verification
+
+    - id: brand_live_campaigns
+      source:
+        api: "GET /api/v1/clients/{brandId}/analytics"
+        method: GET
+        scope_key: client_id
+        field: "activeCampaigns"
+      label: Live Campaigns
+      definition: Campaigns for this brand currently delivering.
+      unit: count
+      freshness: live
+      deck_value: "12"
+      gotchas:
+        - >
+          RULED 2026-09-21 - the label is "Live", not "Active". "Active" is a design typo for the
+          backend's LIVE state (R13/R17).
+      status: pending_verification
+
+    - id: brand_daily_impressions
+      source:
+        api: "GET /api/v1/clients/{brandId}/analytics"
+        method: GET
+        scope_key: client_id
+        field: "totalDailyImpressions"
+      label: Total Daily Impressions
+      unit: per_day
+      freshness: unknown
+      deck_value: "3M"
+      gotchas:
+        - >
+          POLICY 2026-09-24 - resolved in favour of the API/backend over the design. See RESOLUTION-POLICY.md.
+          Impressions - playback events, not people. One name across the product.
+        - >
+          R18 - a third name for the same idea. Command Centre says "Impressions Delivered",
+          Inventory says "Daily Impression", the campaign detail says "Impressions".
+      status: pending_verification
+
+    - id: brand_audience_reach_per_day
+      source:
+        api: "GET /api/v1/clients/{brandId}/analytics"
+        method: GET
+        scope_key: client_id
+        field: "totalAudienceReach"
+      label: Total Audience Reach / day
+      unit: per_day
+      camera_measured: true
+      freshness: batch_6h
+      deck_value: "~12M"
+      gotchas:
+        - >
+          POLICY 2026-09-24 - resolved in favour of the API/backend over the design. See RESOLUTION-POLICY.md.
+          BrandAnalyticsResponse.totalAudienceReach. Report as returned, with its window.
+        - >
+          R12 - "reach" names four different things in the platform and only uniqueVisitors is
+          window-unique. Which this shows is unconfirmed.
+      status: pending_verification
+
+    - id: brand_booked_revenue
+      source:
+        api: "GET /api/v1/clients/{brandId}/analytics"
+        method: GET
+        scope_key: client_id
+        field: "totalEstimatedRevenue"
+      label: Total Booked Revenue
+      definition: Value of campaigns booked for this brand.
+      unit: currency_inr
+      freshness: live
+      deck_value: "1.11 Cr"
+      gotchas:
+        - >
+          Almost certainly the AdPartner-to-Brand leg (what the agency invoices the brand), which
+          carries no GST. The AdGrid-to-AdPartner leg is internal and must never be surfaced.
+      status: pending_verification
+
+    - id: brand_screens_by_city
+      definition: "Share of this brand's screens by city."
+      unit: percent
+      freshness: unknown
+      source:
+        api: "GET /api/v1/clients/{brandId}/analytics"
+        method: GET
+        scope_key: client_id
+        field: "screenDistribution"
+      label: Screen Distribution by Location
+      deck_value: "Delhi 48% (1,200) - Gurugram 32% (800) - Noida 20% (500)"
+      gotchas:
+        - >
+          POLICY 2026-09-24 - definition taken from the deck's annotation card, with the backend's vocabulary where they differ. See RESOLUTION-POLICY.md.
+        - "Renders GGN as 'Gurugram' here, where the Command Centre and Inventory say 'Gurgaon' (R11)."
+      status: pending_verification
+
+  actions:
+
+    - capability: brand.create
+      label: Add Brand
+      mutating: true
+      otp_gated: true
+      gate: PERMISSION
+      permission: MANAGE_BRANDS_UNDER_AGENCY
+      roles: [AD_PARTNER_ADMIN]
+      genie_mode: navigate
+      status: pending_verification
+
+    - capability: campaign.create
+      label: Create Campaign
+      mutating: true
+      otp_gated: false
+      gate: PERMISSION
+      permission: CREATE_CAMPAIGN
+      genie_mode: prefill
+      status: verified
+      verified_against: "CAMPAIGN_CREATION_GUIDE.md 6.6 - POST /api/v1/campaigns creates a DRAFT"
+
+    - capability: campaign.list_for_brand
+      label: Manage campaigns
+      mutating: false
+      gate: PERMISSION
+      permission: VIEW_CAMPAIGN
+      genie_mode: navigate
+      status: pending_verification
+
+    - capability: creative.open_library
+      label: Creative Library
+      mutating: false
+      gate: PERMISSION
+      permission: VIEW_CAMPAIGN
+      genie_mode: navigate
+      status: pending_verification
+
+  notes:
+    - >
+      Campaigns live UNDER a brand - route shape /brands/{brandId}/campaigns/{campaignId}. There is
+      no top-level Campaigns nav item. Genie's NAVIGATE must resolve "show me campaign X" through
+      its brand.
+    - >
+      R19 - the Brand Summary shows "Brand Type: FMCG" while Company Information on the same screen
+      shows "Industry: Food & Beverages, Soft Drinks". Two classifications of one brand, unresolved.
+    - >
+      Brand identity carries a code (deck: [CC7993]) alongside the display name. Genie should
+      resolve either.
+    - >
+      Recent Campaigns shows status badges. Per R17 the canonical states are DRAFT, SCHEDULED, LIVE,
+      COMPLETED, CANCELLED, with PAUSED and NOT_PLAYING computed for display.
+    - >
+      Assigned Campaign Details names an "Assigned User" and "Login ID" - the campaign manager who
+      owns this brand's campaigns and whose sub-wallet pays for them.
+    - >
+      Brand and creative ownership: creatives belong to the ADVERTISED BRAND, not the operating
+      client. A creative attaches only if creative.client_id == campaign.advertisedBrandId.

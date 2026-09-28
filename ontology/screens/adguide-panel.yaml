@@ -1,0 +1,226 @@
+screen:
+  id: adguide_panel
+  kind: panel
+  title: AdGuide
+  route: /*
+  nav_label: AdGuide
+  audience: [AD_PARTNER_ADMIN, CAMPAIGN_MANAGER]
+  source_frame: "Agency Admin Dashboard (1.5).docx - AdGuide/Genie (image7), Campaign Manager variant (image15)"
+  variants: [broadcasting, targeted]
+  purpose: >
+    Genie itself - a docked panel available on every screen. Two tabs: Ask AdGuide for questions,
+    and Calculator for building a media plan. Modelled here so Genie can explain its own behaviour
+    and its own limits.
+  entities: [campaign, brand, wallet, device]
+  related_screens: [command_centre, launch_campaign, brand_management]
+
+  sections:
+    - id: header
+      label: Panel header
+      subtitle: "Title, subtitle 'Your dashboard copilot', close. Tabs: Ask AdGuide | Calculator."
+    - id: context_bar
+      label: Viewing context
+      subtitle: >
+        Renders the screen Genie is grounded on, e.g. "Viewing Home - Overview". This is ui_context
+        made visible, and the user's only way to see what Genie thinks it is looking at.
+    - id: conversation
+      label: Conversation
+      subtitle: "Proactive opener, suggestion chips, message thread, input."
+    - id: calculator
+      label: Calculator
+      subtitle: "Deterministic plan builder. No LLM on this path."
+    - id: recommended_plan
+      label: Recommended plan
+      metrics: [plan_screens, plan_impressions, plan_reach_vs_target, plan_blended_cpm,
+                plan_daily_burn, plan_wallet_reservation, plan_headroom]
+    - id: provenance_footer
+      label: Provenance footer
+      subtitle: >
+        States what Genie is grounded on and its posture - "Grounded on what's on your screen -
+        planning on {brand}'s allocation ({n} screens, {n} cities). AdGuide advises - you decide."
+
+  metrics:
+
+    - id: plan_screens
+      source:
+        api: "POST /api/v1/campaigns/availability-search"
+        method: POST
+        scope_key: client_id
+        field: "totalCount, with cities[] for the split"
+      label: Screens
+      definition: Screens the recommended plan would book.
+      unit: count
+      freshness: live
+      gotchas:
+        - >
+          Availability read now is not availability held - a draft reserves nothing, and screens are held for ten minutes at confirm. A plan can go stale between planning and booking.
+        - >
+          BROADCASTING ONLY. A Targeted campaign reserves no screens at all, so this figure is
+          meaningless for it - see R29.
+      status: pending_verification
+
+    - id: plan_impressions
+      source:
+        api: "POST /api/v1/campaigns/simulate-cost"
+        method: POST
+        scope_key: client_id
+        field: "totalSlotsPerDay multiplied by totalDays"
+      label: Impressions
+      definition: Ad-views the plan is projected to deliver over the flight.
+      unit: count
+      freshness: live
+      gotchas:
+        - >
+          This counts SLOTS, which is plays, which is impressions as the platform defines them - R18, playback events and not people. It assumes every booked slot plays; downtime makes the real figure lower, which is what screen_uptime is for.
+      status: pending_verification
+
+    - id: plan_reach_vs_target
+      label: Reach vs target
+      definition: Unique people the plan reaches, against the target the user asked for.
+      formula: "impressions / avg_frequency, from a curve fitted on person_day"
+      unit: count
+      freshness: live
+      gotchas:
+        - >
+          THE PLATFORM CANNOT SUPPLY THIS TODAY. Of the four things called "reach", only
+          uniqueVisitors is window-unique and it is owner-scoped - it covers only the caller's own
+          stores. For a campaign across screens the agency does not own, no window-unique reach
+          exists. S5 builds the frequency model that makes this computable.
+        - >
+          If the model cannot meet its accuracy gate, ship reach as a RANGE, not a point estimate.
+          A confident single number at plus-or-minus 40% destroys trust in the whole tool.
+      status: blocked
+      blocked_by: [R12]
+      blocked_note: "No window-unique reach exists for non-owned screens until S5 lands."
+
+    - id: plan_blended_cpm
+      source:
+        api: "DERIVED - POST /api/v1/campaigns/simulate-cost totalCost over slots, times 1000"
+        method: NONE
+        scope_key: client_id
+        field: "totalCost, totalSlotsPerDay, totalDays"
+      label: Blended CPM
+      definition: Price per 1,000 impressions across the plan's mix.
+      unit: cpm_inr
+      freshness: live
+      gotchas:
+        - >
+          Derived, and worth labelling as such next to a rate-card CPM, which is a quoted price rather than an achieved one.
+      status: pending_verification
+
+    - id: plan_daily_burn
+      source:
+        api: "POST /api/v1/campaigns/simulate-cost"
+        method: POST
+        scope_key: client_id
+        field: "totalCost divided by totalDays"
+      label: Daily burn
+      definition: Average spend per day over the flight.
+      formula: "total campaign cost / flight days"
+      unit: per_day
+      freshness: live
+      gotchas:
+        - >
+          Flat across the flight, because the cost model is per slot per day. Real burn varies with delivery; this is a plan figure, not a pacing figure.
+      status: pending_verification
+
+    - id: plan_wallet_reservation
+      source:
+        api: "GET /api/v1/clients/{clientId}/wallet/kpis"
+        method: GET
+        scope_key: client_id
+        field: "apRemaining"
+      label: Wallet reservation
+      definition: Credit this plan would consume, and what remains after.
+      formula: "adgrid cost x 1.18, against the wallet the payer draws from"
+      unit: currency_inr
+      freshness: live
+      gotchas:
+        - >
+          POLICY 2026-09-24 - resolved in favour of the API/backend over the design. See RESOLUTION-POLICY.md.
+          Reserve base x 1.18 on the AdGrid-to-AdPartner leg. Show nothing for Targeted - it is postpaid.
+        - >
+          MUST BE base x 1.18. The wallet pays leg 1 (AdGrid to AdPartner) PLUS 18% GST - the
+          coverage check is balance >= adgridCost x 1.18. Quoting the base alone understates it.
+        - >
+          MUST NOT APPEAR AT ALL for a Targeted campaign - those are postpaid, and nothing is
+          charged at confirm.
+        - >
+          Which wallet it draws from depends on the viewer: a campaign manager's own sub-wallet if
+          their role has one, otherwise the agency wallet.
+      status: pending_verification
+
+    - id: plan_headroom
+      source:
+        api: "DERIVED - plan reach against the target the user stated"
+        method: NONE
+        scope_key: none
+        field: "computed by Genie"
+      label: Headroom
+      definition: How far the plan exceeds the reach target, and what to spend the surplus on.
+      unit: percent
+      freshness: live
+      gotchas:
+        - >
+          Depends on plan_reach_vs_target, which is blocked on the S5 reach model. Until then Genie can state the target and say it cannot yet score a plan against it.
+        - >
+          The deck's example - "Target met - 107% headroom. Spend the headroom by weighting Evening
+          or adding Premium venues" - is RULE-BASED ADVICE computed from the plan, not LLM output.
+          The narrator may not introduce a number absent from the plan's facts.
+      status: pending_verification
+
+  actions:
+
+    - capability: plan.generate
+      label: Generate plan
+      mutating: false
+      otp_gated: false
+      gate: PERMISSION
+      permission: VIEW_CAMPAIGN
+      genie_mode: direct
+      status: verified
+      verified_against: "Reads only - availability-search plus simulate-cost. Changes no state."
+
+    - capability: prefill.launch_wizard
+      label: Prefill wizard
+      mutating: false
+      otp_gated: false
+      gate: PERMISSION
+      permission: CREATE_CAMPAIGN
+      genie_mode: prefill
+      status: verified
+      verified_against: >
+        Seeds the Launch wizard's form state in the browser. Creates nothing - the human edits, then
+        submits. The dashboard makes the write, not Genie.
+
+    - capability: plan.refine
+      label: Refine in Calculator
+      mutating: false
+      gate: PERMISSION
+      permission: VIEW_CAMPAIGN
+      genie_mode: direct
+      status: pending_verification
+
+  notes:
+    - >
+      THE PREFILL CTA IS ROLE-DEPENDENT. An AD_PARTNER_ADMIN's wizard ends in "Activate"; a
+      CAMPAIGN_MANAGER's ends in "Submit for approval". The prefill modal must label itself to match
+      the user's role, or it will tell someone their campaign is live when it is queued.
+    - >
+      THE OPENER MUST BE COMPUTED, NOT TEMPLATED. In the deck the Campaign Manager's opening message
+      is byte-identical to the admin's and offers to walk them through campaign approvals - which
+      only an admin can do. Compute it from UserContext.permissions.
+    - >
+      Suggestion chips in the deck - "What needs my attention?", "Explain my wallet position", "Plan
+      a new campaign". These must also be role-filtered; the wallet chip is questionable for a
+      campaign manager (R6).
+    - >
+      THE CALCULATOR HAS NO LLM ON ITS PATH. Constraints in, plan out. That is what lets it be
+      back-tested, and what keeps it working when the model provider is down.
+    - >
+      The panel is available on every route, which is why route is "/*". ui_context changes on
+      navigation and the context bar must follow it.
+    - >
+      R29 - the Calculator offers a Broadcasting / Targeted toggle but the plan card is entirely
+      screen-reservation shaped. For Targeted it should show floor CPM, suggested bid, matched reach
+      per day and estimated spend instead. Either design that card or grey the toggle for v1.

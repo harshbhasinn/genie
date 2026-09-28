@@ -1,0 +1,319 @@
+screen:
+  id: inventory_management
+  kind: screen
+  title: Screen Management
+  route: /inventory
+  nav_label: Inventory Management
+  audience: [AD_PARTNER_ADMIN, CAMPAIGN_MANAGER]
+  source_frame: "Agency Admin Dashboard (1.5).docx - Inventory Management (image6)"
+  variants: [broadcasting]
+  purpose: >
+    The screens this agency can buy on - how many, where, what kind of shop they sit in, how full
+    they already are, and what they cost. This is the pool the Planner allocates from.
+  entities: [device, store, batch, contract]
+  related_screens: [command_centre, launch_campaign]
+
+  filters:
+    - id: inventory_tier
+      label: Premium / Standard
+      default: Standard
+      options: [Premium, Standard]
+      unset_means: >
+        Never unset - the whole screen is tier-scoped by this toggle. The Command Centre has no
+        equivalent toggle, which is R14.
+    - id: city
+      label: City
+      default: null
+      unset_means: All cities in the agency's contracted network
+
+  sections:
+    - id: network
+      label: Network
+      metrics: [owned_screens, active_screens, targeting_capable_screens, monthly_reach]
+    - id: performance
+      label: Performance
+      metrics: [inventory_live_campaigns, avg_targeting_cpm, avg_broadcasting_cpm, daily_impression]
+    - id: store_type_distribution
+      label: Store Type Distribution & Footfall Analysis
+      subtitle: "Two donuts - store category share, and monthly footfall share."
+    - id: city_distribution
+      label: City-wise Distribution & Daily Reach
+      subtitle: "Per city: screens, daily reach, utilisation."
+    - id: audience_availability
+      label: Audience availability by segment
+      subtitle: "Matrix of segment against daypart. Not yet transcribed."
+    - id: conversion_funnel
+      label: From counter customer to billable impressions
+      subtitle: "Funnel from footfall to billable impressions. Not yet transcribed."
+    - id: screen_intelligence
+      label: AdGrid Screen Intelligence
+      subtitle: "Model accuracy and fleet efficiency. Mirrors the Command Centre panel."
+    - id: slot_occupancy
+      label: Slot Occupancy (This Month)
+      subtitle: "Per daypart: how full the loop already is."
+    - id: all_screens
+      label: All Screens
+      subtitle: "Table of every screen - id, store, category, status, and a detail link."
+
+  metrics:
+
+    - id: owned_screens
+      source:
+        api: "GET /api/v1/clients/{clientId}/devices/roster"
+        method: GET
+        scope_key: client_id
+        field: "totalElements, unfiltered"
+        params:
+          clientId: required
+          cityCode: required
+          page: required
+          size: required
+      label: Owned Screens
+      unit: count
+      freshness: unknown
+      deck_value: "10,000 - Rental | Non-Premium"
+      gotchas:
+        - >
+          R8 - 'Contracted'. This is what the agency may buy on, which is not the same as what is powered on right now.
+        - >
+          overviewStats.totalScreenCount on /clients/{clientId}/dashboard is the same number in one hop when no filtering is needed.
+        - >
+          POLICY 2026-09-24 - resolved in favour of the API/backend over the design. See RESOLUTION-POLICY.md.
+          Contracted screens - available to this agency under its contracts.
+        - >
+          R8 - "Owned" here sits beside "Active" and "Targeting-capable" on the same row, and the
+          donut below says "Total Screens" while the Command Centre says "Live Screens" and the
+          brand page says "Screen Used". Six terms, no agreed concept set.
+        - >
+          The sub-label "Rental | Non-Premium" mixes a COMMERCIAL MODEL with an INVENTORY TIER.
+          Proposal: keep Premium/Non-Premium as the tier and treat Rental/Rev-Share as a separate
+          commercial dimension, never a screen count.
+      status: pending_verification
+
+    - id: active_screens
+      source:
+        api: "GET /api/v1/clients/{clientId}/devices/roster"
+        method: GET
+        scope_key: client_id
+        field: "totalElements with status=ONLINE"
+        params:
+          clientId: required
+          status: required
+      label: Active Screens
+      unit: count
+      freshness: unknown
+      deck_value: "3,245 - 68% utilisation"
+      gotchas:
+        - >
+          R8 and R13 - render this as 'Live'. Same call as contracted screens, with the status filter on.
+        - >
+          POLICY 2026-09-24 - resolved in favour of the API/backend over the design. See RESOLUTION-POLICY.md.
+          Live screens - powered on and playing. 'Active' is a design typo for Live.
+        - "RULED 2026-09-21: prefer 'Live' over 'Active' wherever the design says Active."
+      status: pending_verification
+
+    - id: targeting_capable_screens
+      source:
+        api: "GET /api/v1/clients/{clientId}/devices/roster"
+        method: GET
+        scope_key: client_id
+        field: "deviceVariant across the roster"
+        params:
+          clientId: required
+      label: Targeting-capable screens
+      definition: Screens with a camera and on-device intelligence, so they can be audience-matched.
+      unit: count
+      freshness: unknown
+      deck_value: "6,755 / 10k - 64% camera + CV enabled"
+      gotchas:
+        - >
+          R31 - see targeting_capable_share on the Command Centre. The API's targeting path counts NON_PREMIUM devices; the design says 'has a camera'. Say which was counted.
+        - >
+          This is the only one of the six screen terms with an unambiguous meaning, and it is the
+          pool a TARGETED campaign can serve into.
+      status: pending_verification
+
+    - id: monthly_reach
+      label: Monthly Reach
+      unit: count
+      camera_measured: true
+      freshness: batch_6h
+      deck_value: "7.70 Cr - gross, 30-day"
+      gotchas:
+        - >
+          CONTRACT v3.1 SECTION 5 - /dashboard/audience is scoped by the STORE OWNER and serves a NETWORK_PARTNER only. 'The ad-partner and LESSPAY_MERCHANT dashboards are separate products. The columns exist so those can reuse this data later, but nothing here serves them.' An agency owns no stores, so this endpoint is not available to it. This reverses the 2026-09-24 reading that clientId on AudienceDashboardRequest meant agency scope - the request field is shared, the column the backend applies it to is not.
+        - >
+          The content endpoint's `reach` is explicitly the largest single day and is NOT summable across days - contract v3.1 section 3.2. Multiplying it by 30, or adding daily figures, double-counts every returning visitor. A monthly unique figure needs the frequency model from S5.
+        - >
+          R12 - the API's uniqueVisitors is de-duplicated ACROSS the window, so it is NOT the deck's gross monthly figure of daily reach times days. The gross figure counts a returning visitor once per visit; this one counts them once. Label it 'unique'.
+        - >
+          POLICY 2026-09-24 - resolved in favour of the API/backend over the design. See RESOLUTION-POLICY.md.
+          Gross monthly reach - dailyReach x days, de-duplicates nothing. Always say 'gross'.
+        - >
+          Labelled "gross", so almost certainly estimatedMonthlyReach = dailyReach x days, which
+          de-duplicates nothing and whose dailyReach is footfall, not persons. The donut on the same
+          screen shows a different "Total Reach". See R12.
+      status: blocked
+      blocked_by: [R7, R12]
+      blocked_note: >
+        Window-unique reach is computed only for store owners. The ad-partner surface returns a best-single-day figure that cannot be extended to a month without the S5 frequency curve.
+
+    - id: inventory_live_campaigns
+      source:
+        api: "GET /api/v1/clients/{clientId}/dashboard"
+        method: GET
+        scope_key: client_id
+        field: "overviewStats.activeCampaignCount"
+      label: Live Campaigns
+      unit: count
+      freshness: live
+      deck_value: "486 - distinct, across all slots"
+      gotchas:
+        - >
+          The qualifier "distinct, across all slots" differs from the Command Centre's plain count.
+          RULED 2026-09-21 - use "Live". If a slot-instance count is genuinely needed it should be
+          named separately, e.g. "Live placements".
+      status: pending_verification
+
+    - id: avg_targeting_cpm
+      source:
+        api: "POST /api/v1/campaigns/targeted-rate-check"
+        method: POST
+        scope_key: client_id
+        field: "imageFloorCpm, videoFloorCpm"
+      label: Avg Targeting CPM
+      definition: Average clearing price per 1,000 targeted impressions.
+      unit: cpm_inr
+      freshness: live
+      gotchas:
+        - >
+          The floor, not the clearing price - the same caveat as the Command Centre's avg_targeted_cpm, which is this number under a different name.
+        - >
+          The CPM build-up is Base x Audience x Context x Format x Day-part = Floor CPM, and the
+          auction clears above the floor only when demand competes (second-price).
+      status: pending_verification
+
+    - id: avg_broadcasting_cpm
+      source:
+        api: "GET /api/v1/client-rate-cards"
+        method: GET
+        scope_key: client_id
+        field: "imageCpm, videoCpm"
+        params:
+          parentClientId: required
+          clientId: required
+          city: required
+          shopType: required
+          rateCardType: required
+      label: Avg Broadcasting CPM
+      definition: Blended price per 1,000 broadcast impressions across static and video.
+      unit: cpm_inr
+      freshness: live
+      gotchas:
+        - >
+          The rate card gives the PRICE, not the achieved average. Weighting it by the sold image/video mix is Genie's own arithmetic and must be labelled as such.
+        - >
+          This is the AP-to-Brand card. Never surface the AdGrid-to-AP side - that is the agency's own cost basis.
+        - >
+          POLICY 2026-09-24 - resolved in favour of the API/backend over the design. See RESOLUTION-POLICY.md.
+          Command Centre figures are blended across tiers and should be labelled so. Tier is fixed per campaign.
+        - >
+          R14 - this screen is tier-scoped by the Premium/Standard toggle while the Command Centre's
+          card of the same name has no toggle. Whether the Command Centre figure is blended,
+          Standard-only or network-wide is unresolved.
+      status: pending_verification
+
+    - id: daily_impression
+      source:
+        api: "POST /api/v1/dashboard/content"
+        method: POST
+        scope_key: client_id
+        field: "impressions divided by windowDays"
+        params:
+          clientId: required
+          start: required
+          end: required
+      label: Daily Impression
+      definition: Ad-views served per day across this tier's screens.
+      unit: per_day
+      freshness: unknown
+      deck_value: "~25.68L - Camera footfall | 257/screen"
+      formula: "per-screen figure = daily impressions / number of screens"
+      gotchas:
+        - >
+          The per-screen figure the card shows is this divided by devicesPlayed, which the same response returns - not by the contracted screen count, since a screen that played nothing is not in the denominator.
+        - >
+          POLICY 2026-09-24 - resolved in favour of the API/backend over the design. See RESOLUTION-POLICY.md.
+          Impressions per day. The per-screen figure is this divided by screen count.
+        - >
+          RULED 2026-09-22 - the "257/screen" sub-figure is Daily Impression divided by the screen
+          count: an average estimate of how many people pass in front of one screen per day.
+        - >
+          NOTE THE TERM CLASH - the card calls that "camera footfall", but the backend's `footfall`
+          field means visit events, and `impressions` means playback events ("NOT person data").
+          Same word, two senses. Genie should say "average impressions per screen" rather than
+          repeat "camera footfall".
+        - "R18 - a fourth name for impressions per day."
+      status: pending_verification
+
+  actions:
+    - capability: inventory.check_availability
+      label: Check Availability
+      mutating: false
+      gate: PERMISSION
+      permission: VIEW_CAMPAIGN
+      genie_mode: direct
+      status: verified
+      verified_against: "CAMPAIGN_CREATION_GUIDE.md 6.2 - POST /api/v1/campaigns/availability-search"
+
+    - capability: inventory.view_rate_card
+      label: Rate Card
+      mutating: false
+      gate: PERMISSION
+      permission: VIEW_CLIENT_RATES
+      genie_mode: navigate
+      status: pending_verification
+
+    - capability: inventory.edit_rate_card
+      label: Save & lock rate card
+      mutating: true
+      otp_gated: true
+      gate: PERMISSION
+      permission: EDIT_CLIENT_RATES
+      roles: [AD_PARTNER_ADMIN]
+      genie_mode: navigate
+      status: pending_verification
+
+    - capability: inventory.view_map
+      label: Map View
+      mutating: false
+      gate: PERMISSION
+      permission: VIEW_CLIENT
+      genie_mode: navigate
+      status: pending_transcription
+
+    - capability: inventory.export_report
+      label: Export Report
+      mutating: false
+      gate: PERMISSION
+      permission: VIEW_CLIENT
+      genie_mode: navigate
+      status: pending_transcription
+
+  notes:
+    - >
+      R5 - the nav tab reads "Inventory Management" while this page's own heading reads "Screen
+      Management". The same mismatch appears on Team Management / User Management, so it is a
+      convention question, not a one-off.
+    - >
+      THIS IS THE PLANNER'S POOL. What a campaign can book is bounded by what the CLIENT already
+      holds - client_batch_allocation and device_slot_capacity - not by a per-user permission.
+      Clients never compete for the same slots; each client's share of a screen is fixed when its
+      contract starts. That makes broadcast allocation non-competitive and simplifies S6.
+    - >
+      Sub-screens not yet transcribed: Rate Management (slot rates, rate summary and projections),
+      a store detail page with a Live Screen Preview, the Check Availability modal, and a Live
+      Device Map.
+    - >
+      The "Save & lock rate card" flow carries an OTP confirmation in the deck, consistent with the
+      nine OTP-gated open-service domains.

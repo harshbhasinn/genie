@@ -1,0 +1,28 @@
+# Normalise everything to LF, in the repo AND in both working trees.
+#
+# This repo is currently authored on Windows and will be shared with a second
+# machine. Without this, 20 YAML files and 36 Markdown files churn their entire
+# contents on the first commit from the other side, and every real one-line
+# change arrives buried in a whole-file diff. Identical trees on both machines
+# is worth more than native endings.
+* text=auto eol=lf
+
+# Binary — never diffed, never normalised.
+*.jpg   binary
+*.jpeg  binary
+*.png   binary
+*.gif   binary
+*.pdf   binary
+*.docx  binary
+*.xlsx  binary
+
+# Generated. Do NOT hand-resolve a conflict in these — regenerate instead.
+# See CONTRIBUTING.md "When a generated file conflicts".
+#   kb/generated/  ← python tools/render_kb.py
+#   VERIFY.md      ← python tools/verify_sources.py --write
+kb/generated/** linguist-generated=true
+VERIFY.md       linguist-generated=true
+
+# The vendored API spec: real reference material, but 441 KB of machine output.
+# Collapse it in diffs so a respec does not bury the review.
+reference/bff-openapi.json linguist-generated=true

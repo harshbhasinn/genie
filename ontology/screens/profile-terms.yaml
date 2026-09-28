@@ -1,0 +1,50 @@
+screen:
+  id: profile_terms
+  kind: screen
+  title: Profile
+  route: /profile
+  nav_label: Profile
+  audience: [AD_PARTNER_ADMIN, CAMPAIGN_MANAGER]
+  source_frame: "Agency Admin Dashboard (1.5).docx - Profile, Terms and Policies (image10)"
+  purpose: >
+    The signed-in user's own details, and the policy documents that govern using the platform.
+    Reached from the avatar menu, not the main nav.
+  entities: [user, client]
+  related_screens: [team_management, command_centre]
+
+  sections:
+    - id: profile
+      label: Profile
+      subtitle: "The signed-in user's name, contact details and role."
+    - id: terms_policies
+      label: Terms and Policies
+      subtitle: >
+        Terms of Service, Campaign Policies and Cancellation Policies - the same three documents
+        the Launch wizard asks the user to accept.
+
+  actions:
+    - capability: profile.edit
+      label: Edit profile
+      mutating: true
+      otp_gated: false
+      gate: UNKNOWN
+      genie_mode: navigate
+      status: pending_transcription
+
+  notes:
+    - >
+      Deliberately thin. This screen carries no metrics and almost nothing Genie needs to reason
+      about - it is modelled so NAVIGATE can resolve "open my profile" and "show me the terms",
+      and so the route exists in the graph.
+    - >
+      THE POLICY DOCUMENTS MATTER MORE THAN THE SCREEN. Terms of Service, Campaign Policies and
+      Cancellation Policies are exactly the Tier A knowledge-base content that does not yet exist
+      (KNOWLEDGE.md). When someone asks "what happens if I cancel a campaign mid-flight?", the
+      answer should come from the Cancellation Policy - not from Genie improvising.
+    - >
+      Until those documents are in the knowledge base, Genie should deep-link here rather than
+      answer policy questions.
+    - >
+      Two facts already known that belong in the cancellation policy when it is written: cancelling
+      moves no money, and refunds are a separate action with admin refund endpoints currently on
+      hold.

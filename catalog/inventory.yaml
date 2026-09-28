@@ -1,0 +1,267 @@
+domain: inventory
+description: >
+  The screens this agency can buy on - how many, where, how full, and what they cost. Reads only,
+  plus the rate-card handoff. This is also the pool the Planner allocates from.
+
+capabilities:
+
+  - id: inventory.explain_screens
+    label: How many screens
+    description: Screen counts, by whichever sense of "screen" the user means.
+    genie_mode: answer
+    mutating: false
+    otp_gated: false
+    utterances:
+      - how many screens do I have
+      - what's my screen count
+      - how big is my network
+      - how many displays can I use
+      - what inventory do I have
+    answers_with: [owned_screens, active_screens, targeting_capable_screens]
+
+    follow_ups:
+
+      - id: which_screen_count
+        kind: disambiguation
+        when: >
+          The user asks about screens without saying which sense - and the product uses six
+          different terms for them.
+        question: "Which do you mean?"
+        options:
+          - value: owned_screens
+            label: Contracted
+            hint: screens available to you under your contracts
+          - value: active_screens
+            label: Live
+            hint: powered on and currently playing
+          - value: targeting_capable_screens
+            label: Targeting-capable
+            hint: has a camera, so audience targeting can reach it
+        resolved_by_context: [inventory_management]
+        default_after_asks: owned_screens
+        max_asks: 1
+        status: pending_verification
+
+      - id: which_tier
+        kind: disambiguation
+        when: "The user has not said Premium or Standard, and the counts differ materially."
+        question: "Premium or Standard inventory?"
+        options:
+          - value: premium
+            label: Premium
+            hint: screens a network partner installed in its own shops, 120-second loop
+          - value: standard
+            label: Standard
+            hint: screens already in merchant shops, 60-second loop
+          - value: both
+            label: Both
+            hint: the combined pool
+        resolved_by_context: [inventory_management]
+        default_after_asks: both
+        max_asks: 1
+        status: verified
+
+    authorization:
+      gate: PERMISSION
+      permission: VIEW_CLIENT
+
+    gotchas:
+      - >
+        One call answers all three senses: no filter is Contracted, status=ONLINE is Live, and deviceVariant separates premium from non-premium. Read totalElements, not the row count.
+      - >
+        R31 - 'targeting-capable' is deviceVariant NON_PREMIUM on the API's own targeting path, while the design says 'has a camera'. Say which was counted.
+      - >
+        R8 - six terms exist for screens across three screens: Live, Owned, Active, Total,
+        Targeting-capable and Screen Used. The follow-up above lets Genie answer anyway by asking
+        which, while the naming ruling stays open.
+      - >
+        What a campaign can actually book is bounded by what the CLIENT holds under contract, not by
+        a per-user permission. Clients never compete for the same slots.
+
+    status: pending_verification
+
+    execution:
+      state_changing: false
+      method: GET
+      path: "/api/v1/clients/{clientId}/devices/roster"
+      layer: bff
+      note: >
+        Client device roster from the analytics read model - online/offline plus deviceVariant.
+
+  - id: inventory.check_availability
+    label: What is free to book
+    description: Screens available for a given flight, city and category.
+    genie_mode: answer
+    mutating: false
+    utterances:
+      - what's available next month
+      - can I book 500 screens in Delhi
+      - is there inventory free for these dates
+      - check availability
+      - what can I still buy
+
+    follow_ups:
+
+      - id: availability_window
+        kind: slot_fill
+        when: "No dates are given - availability is meaningless without a window."
+        question: "For which dates?"
+        default_after_asks: null
+        max_asks: 1
+        resolved_by_context: [launch_campaign, inventory_management]
+        status: verified
+
+    authorization:
+      gate: PERMISSION
+      permission: VIEW_CAMPAIGN
+
+    gotchas:
+      - >
+        POST but state_changing is false - it reserves nothing. POST /api/v1/campaigns/start-date-availability answers 'when can I start' on its own.
+      - >
+        A draft holds nothing. Screens are reserved at confirm and then for ten minutes, so availability read now is not availability held.
+      - >
+        A draft holds nothing - screens are reserved only at confirm, and then for 10 minutes. So
+        availability seen now is not held, and a plan can go stale between planning and booking.
+      - >
+        A daypart stays bookable until it ends, so today is often still bookable.
+
+    status: pending_verification
+
+    execution:
+      state_changing: false
+      method: POST
+      path: "/api/v1/campaigns/availability-search"
+      layer: bff
+      note: >
+        AvailabilitySearchResponse - totalCount, cities[], storeGroupedView, earliestStartDate. A read that takes a body.
+
+  - id: inventory.explain_distribution
+    label: Where the screens are
+    description: Screens by city and by store category.
+    genie_mode: answer
+    mutating: false
+    utterances:
+      - where are my screens
+      - which cities am I in
+      - what kind of shops are these in
+      - show me the city breakdown
+      - how are screens distributed
+    answers_with: [brand_screens_by_city]
+
+    authorization:
+      gate: PERMISSION
+      permission: VIEW_CLIENT
+
+    execution:
+      method: GET
+      path: "/api/v1/store-overview/{clientId}/location-distribution"
+      layer: bff
+      state_changing: false
+      note: "Store types at /store-overview/{clientId}/store-type-distribution."
+
+    gotchas:
+      - >
+        R30 - the wizard offers Faridabad and Ghaziabad, and other screens add Greater Noida, but
+        the CityCode enum has only three NCR entries. Until that is settled Genie cannot reliably
+        map a city name to a code, so prefer echoing the names the API returns.
+      - >
+        Store categories are Grocery, Pharmacy, Dairy, Electronic, Clothing, Others. Pharmacy and
+        Electronics are flagged high-intent and carry a pricing uplift on targeted campaigns.
+
+    status: pending_verification
+
+  - id: inventory.explain_occupancy
+    label: How full the screens are
+    description: Utilisation - how much of the loop is already sold.
+    genie_mode: answer
+    mutating: false
+    utterances:
+      - how full are my screens
+      - what's my utilisation
+      - how much inventory is unsold
+      - are there empty slots
+      - what's my fill rate
+
+    authorization:
+      gate: PERMISSION
+      permission: VIEW_CLIENT
+
+    execution:
+      method: POST
+      path: "/api/v1/inventory/heatmap"
+      layer: bff
+      state_changing: false
+
+    gotchas:
+      - >
+        Loop capacity depends on tier - 120 seconds on premium, 60 on standard - so a slot count
+        means different things on each. Plays per daypart = daypart seconds divided by loop seconds.
+      - >
+        Unsold slots on camera-capable screens are what the targeted auction monetises, so "empty"
+        is not necessarily wasted.
+
+    status: pending_verification
+
+  - id: inventory.explain_rates
+    label: What inventory costs
+    description: Rate cards, floors and how a price is built up.
+    genie_mode: answer
+    mutating: false
+    utterances:
+      - what does a screen cost
+      - show me my rate card
+      - what's the CPM
+      - how much do I pay per thousand
+      - why is targeted more expensive
+
+    authorization:
+      gate: PERMISSION
+      permission: VIEW_CLIENT_RATES
+
+    execution:
+      method: POST
+      path: "/api/v1/campaigns/targeted-rate-check"
+      layer: bff
+      state_changing: false
+      note: "Rate cards under Client Rate Cards. Never surface the AdGrid-to-AP breakdown."
+
+    gotchas:
+      - >
+        The targeted floor is built up as Base x Audience x Context x Format x Day-part, and the
+        auction clears above it only when demand competes - second price, so you pay the runner-up's
+        bid rather than your own.
+      - >
+        NEVER surface the AdGrid-to-AdPartner per-cell breakdown. It is marked internal and is the
+        agency's own cost basis.
+
+    status: pending_verification
+
+  - id: inventory.edit_rate_card
+    label: Change a rate card
+    genie_mode: handoff
+    mutating: true
+    otp_gated: true
+    target_screen: inventory_management
+    utterances:
+      - change my rates
+      - update the rate card
+      - set a new CPM
+      - lock in these rates
+    refusal: >
+      Rate card changes are locked behind an OTP, so I can't make them. I'll open Rate Management
+      for you.
+
+    authorization:
+      gate: PERMISSION
+      permission: EDIT_CLIENT_RATES
+      roles: [AD_PARTNER_ADMIN]
+
+    execution:
+      method: NONE
+      path: "/api/v1/clients/{clientId}/rate-cards"
+      layer: frontend
+      state_changing: true
+      note: "OTP-gated. Path approximate - confirm against Client Rate Cards."
+
+    status: pending_verification

@@ -1,0 +1,584 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://adgrid.ai/genie/ontology/screen.schema.json",
+  "title": "Ontology screen",
+  "type": "object",
+  "required": [
+    "screen"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "screen": {
+      "type": "object",
+      "required": [
+        "id",
+        "title",
+        "route",
+        "audience",
+        "purpose"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$"
+        },
+        "title": {
+          "type": "string"
+        },
+        "route": {
+          "type": "string",
+          "pattern": "^/"
+        },
+        "nav_label": {
+          "type": "string"
+        },
+        "audience": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/role"
+          }
+        },
+        "purpose": {
+          "type": "string"
+        },
+        "source_frame": {
+          "type": "string"
+        },
+        "entities": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "filters": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/filter"
+          }
+        },
+        "sections": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/section"
+          }
+        },
+        "metrics": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/metric"
+          }
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/action"
+          }
+        },
+        "related_screens": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "notes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "kind": {
+          "description": "'screen' = a normal page. 'wizard' = a multi-step flow with steps[].",
+          "enum": [
+            "screen",
+            "wizard",
+            "panel",
+            "modal"
+          ]
+        },
+        "steps": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/step"
+          }
+        },
+        "variants": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/variant"
+          },
+          "description": "Delivery modes this screen supports."
+        }
+      }
+    }
+  },
+  "$defs": {
+    "role": {
+      "enum": [
+        "ADOPS_ADMIN",
+        "AD_PARTNER_ADMIN",
+        "NETWORK_PARTNER_ADMIN",
+        "CAMPAIGN_MANAGER",
+        "BRAND_MANAGER",
+        "HARDWARE_MANAGER",
+        "KELLY_WORKER",
+        "STATION_WORKER"
+      ]
+    },
+    "status": {
+      "enum": [
+        "verified",
+        "pending_verification",
+        "blocked",
+        "pending_transcription"
+      ]
+    },
+    "unit": {
+      "enum": [
+        "percent",
+        "ratio",
+        "currency_inr",
+        "count",
+        "seconds",
+        "milliseconds",
+        "cpm_inr",
+        "per_day",
+        "days",
+        "multiplier",
+        "text"
+      ]
+    },
+    "freshness": {
+      "description": "batch_6h metrics are camera-derived and recomputed in full every run, so they can change retroactively. Genie must stamp as_of on them.",
+      "enum": [
+        "live",
+        "batch_6h",
+        "unknown"
+      ]
+    },
+    "scope_key": {
+      "description": "owner_id = everyone who entered YOUR stores. client_id = only YOUR creatives, wherever they played. Wrong key leaks another tenant's data.",
+      "enum": [
+        "owner_id",
+        "client_id",
+        "none",
+        "unknown"
+      ]
+    },
+    "filter": {
+      "type": "object",
+      "required": [
+        "id",
+        "label"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "default": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "unset_means": {
+          "type": "string"
+        },
+        "options": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "section": {
+      "type": "object",
+      "required": [
+        "id",
+        "label"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "subtitle": {
+          "type": "string"
+        },
+        "metrics": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "source": {
+      "type": "object",
+      "required": [
+        "api",
+        "scope_key"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "api": {
+          "type": "string"
+        },
+        "scope_key": {
+          "$ref": "#/$defs/scope_key"
+        },
+        "params": {
+          "type": "object"
+        },
+        "field": {
+          "type": "string"
+        },
+        "method": {
+          "enum": [
+            "GET",
+            "POST",
+            "NONE"
+          ],
+          "description": "Reads only. POST appears because several read endpoints take a body."
+        }
+      }
+    },
+    "metric": {
+      "type": "object",
+      "required": [
+        "id",
+        "label",
+        "status"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$"
+        },
+        "label": {
+          "type": "string"
+        },
+        "definition": {
+          "type": "string"
+        },
+        "formula": {
+          "type": "string"
+        },
+        "unit": {
+          "$ref": "#/$defs/unit"
+        },
+        "freshness": {
+          "$ref": "#/$defs/freshness"
+        },
+        "camera_measured": {
+          "type": "boolean"
+        },
+        "source": {
+          "$ref": "#/$defs/source"
+        },
+        "gotchas": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "good_range": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {
+            "type": "number"
+          }
+        },
+        "status": {
+          "$ref": "#/$defs/status"
+        },
+        "verified_against": {
+          "type": "string"
+        },
+        "blocked_by": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^(R[0-9]{1,2}|D[0-9]{1,2}|B[0-9]{1,2}|N[0-9]{1,2})$"
+          }
+        },
+        "blocked_note": {
+          "type": "string"
+        },
+        "owner": {
+          "type": "string"
+        },
+        "deck_value": {
+          "type": "string",
+          "description": "The mock value shown in the design. For cross-checking only. NEVER served."
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "verified"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "required": [
+              "definition",
+              "unit",
+              "source",
+              "verified_against"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "blocked"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "required": [
+              "blocked_by",
+              "blocked_note"
+            ]
+          }
+        }
+      ]
+    },
+    "action": {
+      "type": "object",
+      "required": [
+        "capability",
+        "label",
+        "status"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "capability": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+        },
+        "label": {
+          "type": "string"
+        },
+        "mutating": {
+          "type": "boolean"
+        },
+        "otp_gated": {
+          "type": "boolean",
+          "description": "True for the nine OTP-gated open-service domains. Genie can NEVER complete these."
+        },
+        "gate": {
+          "enum": [
+            "PERMISSION",
+            "ROLE",
+            "NONE",
+            "UNKNOWN"
+          ]
+        },
+        "permission": {
+          "type": "string"
+        },
+        "roles": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/role"
+          }
+        },
+        "genie_mode": {
+          "description": "What Genie may do. prefill = seed the UI and stop. navigate = deep link only.",
+          "enum": [
+            "prefill",
+            "navigate",
+            "direct",
+            "none"
+          ]
+        },
+        "status": {
+          "$ref": "#/$defs/status"
+        },
+        "verified_against": {
+          "type": "string"
+        },
+        "blocked_by": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^(R[0-9]{1,2}|D[0-9]{1,2}|B[0-9]{1,2}|N[0-9]{1,2})$"
+          }
+        },
+        "blocked_note": {
+          "type": "string"
+        }
+      }
+    },
+    "variant": {
+      "description": "Which delivery mode a step or field belongs to. 'both' = shared across modes.",
+      "enum": [
+        "broadcasting",
+        "targeted",
+        "both"
+      ]
+    },
+    "field": {
+      "type": "object",
+      "required": [
+        "id",
+        "label",
+        "type",
+        "status"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$"
+        },
+        "label": {
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "text",
+            "number",
+            "currency_inr",
+            "date",
+            "date_range",
+            "enum",
+            "multi_enum",
+            "entity_ref",
+            "toggle",
+            "slider",
+            "checkbox",
+            "computed",
+            "readonly"
+          ]
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "applies_to": {
+          "$ref": "#/$defs/variant"
+        },
+        "options": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "unit": {
+          "$ref": "#/$defs/unit"
+        },
+        "default": {
+          "type": [
+            "string",
+            "number",
+            "boolean",
+            "null"
+          ]
+        },
+        "constraints": {
+          "type": "string",
+          "description": "Human-readable limits, e.g. 'max 18 static spots per loop'."
+        },
+        "derived_from": {
+          "type": "string",
+          "description": "For type=computed: what it is computed from."
+        },
+        "prefillable": {
+          "type": "boolean",
+          "description": "Can Genie seed this field from a plan? S8 depends on this."
+        },
+        "maps_to": {
+          "type": "string",
+          "description": "The backend request field this populates. Required when prefillable and verified."
+        },
+        "gotchas": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "status": {
+          "$ref": "#/$defs/status"
+        },
+        "verified_against": {
+          "type": "string"
+        },
+        "blocked_by": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^(R[0-9]{1,2}|D[0-9]{1,2}|B[0-9]{1,2}|N[0-9]{1,2})$"
+          }
+        },
+        "blocked_note": {
+          "type": "string"
+        },
+        "deck_value": {
+          "type": "string"
+        }
+      }
+    },
+    "step": {
+      "type": "object",
+      "required": [
+        "id",
+        "index",
+        "title"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$"
+        },
+        "index": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "title": {
+          "type": "string"
+        },
+        "applies_to": {
+          "$ref": "#/$defs/variant"
+        },
+        "purpose": {
+          "type": "string"
+        },
+        "fields": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/field"
+          }
+        },
+        "notes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

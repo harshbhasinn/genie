@@ -1,0 +1,746 @@
+domain: campaign
+description: >
+  Planning, reading and acting on campaigns. This is the largest domain and the one AdGuide was
+  designed around - the Calculator plans, the prefill hands off to the wizard, and every mutation
+  past that point is OTP-gated.
+
+capabilities:
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # PLAN - the Calculator. Deterministic; no LLM on this path.
+  # ─────────────────────────────────────────────────────────────────────────
+
+  - id: campaign.plan
+    label: Plan a campaign
+    description: >
+      Build a media plan from constraints - which screens, how many impressions, what reach, what
+      it costs. Computed by the planner, narrated by the model, never invented.
+    genie_mode: plan
+    mutating: false
+    otp_gated: false
+    utterances:
+      - plan a new campaign
+      - build me a media plan
+      - what can I get for 5 lakhs
+      - how many screens can I afford
+      - plan a campaign for Coca-Cola
+      - I want to run a campaign next month
+      - what would a 30 day campaign cost
+      - help me plan something for Diwali
+
+    follow_ups:
+      - id: which_brand
+        kind: entity_choice
+        when: "No brand is named and ui_context is not already scoped to one."
+        question: "Which brand is this campaign for?"
+        options_from: "brands under this agency"
+        default_after_asks: null
+        max_asks: 1
+        resolved_by_context: [brand_management, campaign_detail, launch_campaign]
+        status: pending_verification
+
+      - id: which_delivery_mode
+        kind: disambiguation
+        when: "The user has not said whether they want reserved slots or audience targeting."
+        question: "Which kind of campaign?"
+        options:
+          - value: broadcasting
+            label: Broadcasting
+            hint: reserve slots on chosen screens, priced per 1,000 impressions
+          - value: targeted
+            label: Targeted
+            hint: no screens reserved - your ad serves when a matching person is detected, billed per impression
+        default_after_asks: broadcasting
+        max_asks: 1
+        resolved_by_context: [launch_campaign]
+        status: verified
+
+      - id: what_budget
+        kind: slot_fill
+        when: "No budget is stated."
+        question: "What budget should I plan against?"
+        default_after_asks: null
+        max_asks: 2
+        resolved_by_context: [launch_campaign]
+        status: verified
+
+      - id: how_long
+        kind: slot_fill
+        when: "No flight length or date range is stated."
+        question: "How long should it run?"
+        options:
+          - value: "7"
+            label: 7 days
+            hint: a short burst
+          - value: "15"
+            label: 15 days
+            hint: the usual default
+          - value: "30"
+            label: 30 days
+            hint: a full month
+        default_after_asks: "15"
+        max_asks: 1
+        resolved_by_context: [launch_campaign]
+        status: verified
+
+      - id: reach_target
+        kind: slot_fill
+        when: "The user has not said how many people they want to reach."
+        question: "Any reach target, or should I maximise it within the budget?"
+        default_after_asks: maximise
+        max_asks: 1
+        status: verified
+
+    authorization:
+      gate: PERMISSION
+      permission: VIEW_CAMPAIGN
+      scope: brand must be under a client in accessible_client_ids
+      verified_against: "Reads only - availability-search plus cost simulation. Changes no state."
+
+    execution:
+      state_changing: false
+      method: POST
+      path: /v1/genie/plan
+      layer: genie
+      pending: false
+      note: "Genie's own endpoint. Calls inventory and pricing beneath it."
+
+    gotchas:
+      - >
+        Ask at most one or two of these per turn. A five-question interrogation before the first
+        number appears is what makes an assistant feel worse than the form it replaced.
+      - >
+        A draft holds nothing - screens are only reserved at confirm, for 10 minutes. So a plan can
+        sit unconfirmed without consuming inventory, and Genie can re-plan freely.
+      - >
+        R29 - the plan card as designed is entirely Broadcasting-shaped (screens, city allocation).
+        Targeted reserves no screens; its card would need floor CPM, suggested bid and matched reach
+        instead. Until that is designed, prefer Broadcasting or say the Targeted plan is limited.
+
+    status: blocked
+    blocked_by: [R12, R29]
+    blocked_note: >
+      R12 - the plan promises unique reach, and no window-unique reach exists for screens the agency
+      does not own until the frequency model (S5) lands. R29 - no Targeted variant of the plan card.
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # PREFILL - the hand-off. Genie seeds the form; a human submits.
+  # ─────────────────────────────────────────────────────────────────────────
+
+  - id: campaign.prefill_wizard
+    label: Prefill the Launch wizard
+    description: >
+      Carry a finished plan into the Launch wizard as editable form values. Genie writes nothing to
+      the backend - the dashboard does, after a person reviews.
+    genie_mode: prefill
+    mutating: false
+    otp_gated: false
+    target_screen: launch_campaign
+    utterances:
+      - set that up
+      - put this into the wizard
+      - create this campaign
+      - go ahead and book it
+      - prefill the launch form
+      - take this plan forward
+
+    authorization:
+      gate: PERMISSION
+      permission: CREATE_CAMPAIGN
+      scope: brand must be under a client in accessible_client_ids
+      verified_against: "CAMPAIGN_CREATION_GUIDE.md 6.6 - creating a DRAFT needs CREATE_CAMPAIGN"
+
+    execution:
+      state_changing: false
+      method: NONE
+      layer: frontend
+      note: "Seeds browser form state. Every value stays editable."
+
+    preconditions:
+      - "A plan must exist in the session."
+      - "Client must be ACTIVE - a frozen or suspended client cannot create or edit."
+
+    gotchas:
+      - >
+        THE BUTTON LABEL IS ROLE-DEPENDENT (R21). An AD_PARTNER_ADMIN's wizard ends in "Activate" -
+        they are the checker. A CAMPAIGN_MANAGER's ends in "Submit for approval", and the campaign
+        waits in Pending until an admin authorises it with an OTP. Saying "activate" to a campaign
+        manager tells them their campaign is live when it is queued.
+      - >
+        Prefill must be variant-aware - Broadcasting fills Select Screens, Targeted fills Audience
+        Targeting. They are different step 2s.
+      - >
+        Genie never ticks the Terms & Conditions box. That is an explicit human acceptance.
+
+    status: pending_verification
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # ANSWER - reading campaigns.
+  # ─────────────────────────────────────────────────────────────────────────
+
+  - id: campaign.explain_performance
+    label: How a campaign is doing
+    description: Delivery, reach, frequency, CPM and spend for one campaign.
+    genie_mode: answer
+    mutating: false
+    utterances:
+      - how is my campaign doing
+      - how is this performing
+      - show me campaign performance
+      - is my campaign working
+      - what are the numbers on this campaign
+    answers_with: [campaign_impressions, campaign_reach, campaign_frequency, campaign_cpm,
+                   campaign_spend, campaign_percent_delivered]
+
+    follow_ups:
+
+      - id: which_campaign
+        kind: entity_choice
+        when: "Several campaigns match the name, or none is named and none is on screen."
+        question: "Which campaign?"
+        options_from: "campaigns for the brands this user can see"
+        default_after_asks: null
+        max_asks: 1
+        resolved_by_context: [campaign_detail]
+        status: pending_verification
+
+      - id: performance_window
+        kind: scope
+        when: "No period is stated and the screen carries no date range."
+        question: "Over what period?"
+        options:
+          - value: campaign_to_date
+            label: Campaign to date
+            hint: everything since it went live
+          - value: last_7_days
+            label: Last 7 days
+            hint: recent trend only
+          - value: screen_window
+            label: The dashboard's current window
+            hint: matches what is on screen
+        default_after_asks: campaign_to_date
+        max_asks: 1
+        resolved_by_context: [campaign_detail, command_centre]
+        status: verified
+
+    authorization:
+      gate: PERMISSION
+      permission: VIEW_CAMPAIGN
+
+    gotchas:
+      - >
+        This endpoint does NOT return impressions, reach or spend-to-date. Delivery for an agency comes from POST /api/v1/dashboard/content at client scope, over the campaign's own dates - and even then it cannot be narrowed to one campaign unless the creative filter isolates it.
+      - >
+        So the honest answer to 'how is my campaign doing' today is budget, screen count and state, plus a clear statement that per-campaign delivery is not served yet.
+      - "Always echo the resolved window - a misread surfaces immediately rather than three turns later."
+      - >
+        Impressions are playback events; reach is people. Never present one as the other.
+
+    status: pending_verification
+
+    execution:
+      state_changing: false
+      method: GET
+      path: "/api/v1/campaign-oversight/campaigns/{campaignId}/metrics"
+      layer: bff
+      note: >
+        CampaignMetricsResponse returns campaignId, status, budget and totalScreens - configuration, not delivery.
+
+  - id: campaign.explain_pacing
+    label: Whether a campaign is on track
+    description: Delivery against the plan, and whether that is healthy.
+    genie_mode: answer
+    mutating: false
+    utterances:
+      - is my campaign on track
+      - will it finish on time
+      - is it pacing well
+      - am I under-delivering
+      - is it spending too fast
+      - will I hit my impressions
+    answers_with: [campaign_percent_delivered, campaign_time_elapsed, campaign_projected_final]
+
+    authorization:
+      gate: PERMISSION
+      permission: VIEW_CAMPAIGN
+
+    execution:
+      method: GET
+      path: "/api/v1/campaign-oversight/campaigns/{campaignId}/metrics"
+      layer: bff
+      state_changing: false
+      note: "Read the campaign pacing mode before judging - Accelerated front-loads by design."
+
+    gotchas:
+      - >
+        THE DEFINITION IS GIVEN BY THE PRODUCT, verbatim - "The marker shows time elapsed. Delivery
+        tracking the marker = healthy pacing; ahead = burning fast; behind = under-delivering."
+      - >
+        CRITICAL - a Targeted campaign carries a pacing MODE. Under "Even", behind schedule is a
+        defect. Under "Accelerated", front-loading is the whole point and "behind" late in the
+        flight is expected. Read the campaign's pacing mode before calling anything wrong.
+
+    status: pending_verification
+
+  - id: campaign.explain_audience
+    label: Who saw a campaign
+    description: Gender and age mix of the people a campaign reached.
+    genie_mode: answer
+    mutating: false
+    utterances:
+      - who saw my ad
+      - what's the audience for this campaign
+      - show me the demographics
+      - what age group did I reach
+      - who is watching my campaign
+    answers_with: [campaign_audience_profile]
+
+    authorization:
+      gate: PERMISSION
+      permission: VIEW_CAMPAIGN
+      scope: client_id grain - the agency's own creatives, wherever they played
+
+    execution:
+      method: POST
+      path: "/api/v1/dashboard/content"
+      layer: bff
+      state_changing: false
+      note: "A POST that changes nothing. Demographics NOT yet on ContentWindowResponse - see R7."
+
+    gotchas:
+      - >
+        Served through the CONTENT endpoint, client_id scope (R7 ruling) - "who saw my ads", not
+        "who entered my shops". The agency owns no shops.
+      - >
+        Camera-derived, so the figures refresh roughly every 6 hours and can change retroactively -
+        the batch is a full recompute. Stamp as_of.
+      - >
+        If fewer than 10 distinct people are in the window the response is suppressed. Render that
+        as "too few people to report", NEVER as zero.
+
+    status: blocked
+    blocked_by: [R15]
+    blocked_note: >
+      Age band taxonomy - five bands in the design, four opaque keys from the API. Scope itself is
+      settled (content endpoint, client_id).
+
+  - id: campaign.list
+    label: List campaigns
+    description: Campaigns for a brand or across the agency, with their states.
+    genie_mode: answer
+    mutating: false
+    utterances:
+      - show me my campaigns
+      - what campaigns are running
+      - list all campaigns
+      - which campaigns are live
+      - what's scheduled
+
+    follow_ups:
+
+      - id: which_state
+        kind: disambiguation
+        when: "The request does not say which states to include."
+        question: "Which campaigns?"
+        options:
+          - value: live
+            label: Live
+            hint: currently delivering
+          - value: scheduled
+            label: Scheduled
+            hint: confirmed but not started yet
+          - value: draft
+            label: Drafts
+            hint: started but never confirmed - these hold no screens
+          - value: all
+            label: All of them
+            hint: every state including completed and cancelled
+        default_after_asks: live
+        max_asks: 1
+        resolved_by_context: [brand_management, command_centre]
+        status: verified
+
+    authorization:
+      gate: PERMISSION
+      permission: VIEW_CAMPAIGN
+
+    gotchas:
+      - >
+        Read totalElements for 'how many campaigns do I have'. Counting the rows counts one page.
+      - >
+        States are DRAFT, SCHEDULED, LIVE, COMPLETED and CANCELLED. PAUSED and NOT_PLAYING are computed, not stored - do not filter on them as if they were.
+      - >
+        Canonical states are DRAFT, SCHEDULED, LIVE, COMPLETED, CANCELLED, with PAUSED and
+        NOT_PLAYING computed for display. Say "Live", not "Active" - "Active" is a design typo.
+      - >
+        A caller who can create campaigns sees only THEIR OWN drafts in the list. Do not present a
+        draft count as agency-wide.
+
+    status: pending_verification
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # HANDOFF - every campaign mutation past the draft is OTP-gated.
+  # ─────────────────────────────────────────────────────────────────────────
+
+    execution:
+      state_changing: false
+      method: GET
+      path: "/api/v1/campaigns"
+      layer: bff
+      note: >
+        CampaignListResponse - a page of CampaignDetailResponse, with the page envelope for counts.
+
+  - id: campaign.pause
+    label: Pause a campaign
+    genie_mode: handoff
+    mutating: true
+    otp_gated: true
+    target_screen: campaign_detail
+    utterances:
+      - pause this campaign
+      - stop the campaign for now
+      - put it on hold
+      - halt delivery
+    refusal: >
+      Pausing needs an OTP, so I can't do it for you. I'll open the campaign - the pause control is
+      in the header menu.
+
+    authorization:
+      gate: PERMISSION
+      permission: EDIT_CAMPAIGN
+      client_operation: CAMPAIGN_WINDDOWN
+      verified_against: >
+        F1 audit - CampaignControllerImpl.initiatePauseCampaign carries
+        @RequireAccess(permission = EDIT_CAMPAIGN) and @RequireClientOperational(CAMPAIGN_WINDDOWN).
+        PAUSE_CAMPAIGN is declared in the enum but NEVER used in an @RequireAccess.
+
+    execution:
+      method: NONE
+      path: "/api/v1/campaigns/{campaignId}/initiate-pause"
+      layer: frontend
+      state_changing: true
+      note: "OTP-gated. Genie deep-links only."
+
+    gotchas:
+      - >
+        CORRECTS PLAN.md 8, which listed campaign.pause as a v1 DIRECT mutation for Genie. It is
+        OTP-gated, so Genie can never complete it. Handoff only.
+
+    status: verified
+    verified_against: "CAMPAIGN_CREATION_GUIDE.md key rule 17"
+
+  - id: campaign.resume
+    label: Resume a paused campaign
+    genie_mode: handoff
+    mutating: true
+    otp_gated: true
+    target_screen: campaign_detail
+    utterances:
+      - resume the campaign
+      - start it again
+      - un-pause this
+      - put it back live
+    refusal: "Resuming needs an OTP. I'll take you to the campaign so you can do it there."
+
+    authorization:
+      gate: PERMISSION
+      permission: EDIT_CAMPAIGN
+      client_operation: CAMPAIGN_WINDDOWN
+      verified_against: "F1 audit - CampaignControllerImpl.initiateResumeCampaign"
+
+    execution:
+      method: NONE
+      path: "/api/v1/campaigns/{campaignId}/initiate-resume"
+      layer: frontend
+      state_changing: true
+      note: "OTP-gated. Genie deep-links only."
+
+    status: verified
+    verified_against: "F1 audit; CAMPAIGN_CREATION_GUIDE.md key rule 17"
+
+  - id: campaign.cancel
+    label: Cancel a campaign
+    genie_mode: handoff
+    mutating: true
+    otp_gated: true
+    target_screen: campaign_detail
+    utterances:
+      - cancel this campaign
+      - stop it permanently
+      - kill the campaign
+      - end it early
+    refusal: >
+      Cancelling needs an OTP and can't be undone, so I won't do it for you. I'll open the campaign.
+      Worth knowing - cancelling does not refund; that is a separate step.
+
+    authorization:
+      gate: PERMISSION
+      permission: DELETE_CAMPAIGN
+      roles: [AD_PARTNER_ADMIN, NETWORK_PARTNER_ADMIN, ADOPS_ADMIN]
+      verified_against: "CAMPAIGN_CREATION_GUIDE.md 2.3 - CAMPAIGN_MANAGER cannot cancel, lacks DELETE_CAMPAIGN"
+
+    execution:
+      method: NONE
+      path: "/api/v1/campaigns/{campaignId}/initiate-cancel"
+      layer: frontend
+      state_changing: true
+      note: "OTP-gated, SCHEDULED/LIVE only. Genie deep-links only."
+
+    preconditions:
+      - "Only SCHEDULED or LIVE campaigns can be cancelled. A draft simply stays a draft."
+
+    gotchas:
+      - >
+        A CAMPAIGN_MANAGER cannot cancel. For that role, say so plainly and suggest asking an admin
+        rather than offering a dead end.
+      - "Cancelling moves no money. Refunds are a separate action, and admin refunds are on hold."
+
+    status: verified
+    verified_against: "CAMPAIGN_CREATION_GUIDE.md key rules 17 and 19"
+
+  - id: campaign.approve
+    label: Approve a pending campaign
+    genie_mode: handoff
+    mutating: true
+    otp_gated: true
+    target_screen: notifications_approvals
+    utterances:
+      - approve this campaign
+      - authorise the pending campaigns
+      - sign off on these requests
+      - clear the approval queue
+    refusal: >
+      Approving needs an OTP sent to your registered mobile, plus your acknowledgement of the terms -
+      so it has to be you. I'll open the approvals queue with the pending requests listed.
+
+    authorization:
+      gate: ROLE
+      roles: [AD_PARTNER_ADMIN, NETWORK_PARTNER_ADMIN]
+      verified_against: "Approvals banner - 'Approving requires OTP verification'; key rule 16 - maker-checker on confirm only"
+
+    execution:
+      method: NONE
+      path: "/api/v1/approvals/{referenceCode}/approve"
+      layer: frontend
+      state_changing: true
+      note: "Needs the OTP and a ticked acknowledgement. Genie deep-links only."
+
+    gotchas:
+      - >
+        Genie CAN usefully summarise the queue first - how many, whose, total budget, which is
+        oldest, and whether each manager's sub-wallet covers their request.
+      - "Approval is bulk-capable - one OTP can clear several campaigns at once."
+
+    status: verified
+    verified_against: "CAMPAIGN_CREATION_GUIDE.md key rule 16"
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # The three transitions the API has and the designs do not. None is OTP-gated,
+  # all three are still writes, so Genie explains and hands off exactly as above.
+  # ─────────────────────────────────────────────────────────────────────────
+
+  - id: campaign.send_back
+    label: Send a request back for changes
+    description: >
+      Return a pending approval to the manager who raised it, with a reason, instead of rejecting
+      it outright. The request stays alive and can be resubmitted.
+    genie_mode: handoff
+    mutating: true
+    otp_gated: false
+    target_screen: notifications_approvals
+    utterances:
+      - send this back to the manager
+      - ask them to fix the campaign
+      - return this request for changes
+      - this needs changes before I approve it
+      - bounce it back with a note
+    refusal: >
+      I can't send a request back myself - the reason goes on the record under your name. I'll open
+      the approvals queue on that request so you can write it.
+
+    authorization:
+      gate: ROLE
+      roles: [AD_PARTNER_ADMIN, NETWORK_PARTNER_ADMIN]
+      verified_against: "POST /api/v1/approvals/{referenceCode}/send-back exists on the live BFF"
+
+    execution:
+      method: NONE
+      path: "/api/v1/approvals/{referenceCode}/send-back"
+      layer: frontend
+      state_changing: true
+      note: >
+        Takes ApprovalReasonRequest. No OTP, unlike approve. Genie deep-links; it never calls this.
+
+    gotchas:
+      - >
+        D10 - this exists in the API and in none of the designs, which show approve and reject only.
+        When a user says "reject", check whether they mean kill it or return it: rejection is
+        terminal for that request, send-back is not.
+      - >
+        Genie's useful contribution here is the reason. It can draft what is wrong with the request -
+        budget over the manager's sub-wallet, creatives not approved, flight dates already closed -
+        and let the checker edit and send.
+
+    status: pending_verification
+
+  - id: campaign.withdraw_request
+    label: Withdraw my own request
+    description: Pull back an approval request you raised, before anyone acts on it.
+    genie_mode: handoff
+    mutating: true
+    otp_gated: false
+    target_screen: notifications_approvals
+    utterances:
+      - cancel my approval request
+      - withdraw the campaign I submitted
+      - take back my request
+      - I submitted that by mistake
+      - un-submit my campaign
+
+    follow_ups:
+      - id: which_request
+        kind: entity_choice
+        when: "The user has more than one request in flight and names none of them."
+        question: "Which request?"
+        options_from: "GET /api/v1/approvals/mine, filtered to requests still awaiting a verdict"
+        resolved_by_context: [notifications_approvals]
+        default_after_asks: null
+        max_asks: 1
+        status: pending_verification
+
+    refusal: >
+      Withdrawing is your call to make on the record, so I can't do it for you - but I'll open the
+      request. Note that withdrawing does not delete the campaign; it goes back to being a draft
+      you can edit and resubmit.
+
+    authorization:
+      gate: ROLE
+      roles: [CAMPAIGN_MANAGER, AD_PARTNER_ADMIN]
+      scope: "The MAKER only. makerUserId on the request must be the caller."
+      verified_against: "POST /api/v1/approvals/{referenceCode}/withdraw exists on the live BFF"
+
+    execution:
+      method: NONE
+      path: "/api/v1/approvals/{referenceCode}/withdraw"
+      layer: frontend
+      state_changing: true
+      note: "No request body. Genie deep-links only."
+
+    gotchas:
+      - >
+        This is the maker's route, not the checker's. A checker who wants a request gone uses reject
+        or send-back; a maker who changes their mind uses this.
+      - >
+        D10 - absent from the designs. A campaign manager asking "how do I cancel what I submitted"
+        would otherwise be told, wrongly, that only an admin can act.
+
+    status: pending_verification
+
+  - id: campaign.resubmit_request
+    label: Resubmit a sent-back request
+    description: Put a request that was returned for changes back into the approval queue.
+    genie_mode: handoff
+    mutating: true
+    otp_gated: false
+    target_screen: notifications_approvals
+    utterances:
+      - resubmit this campaign
+      - send it for approval again
+      - I fixed it, put it back in the queue
+      - resubmit after the changes
+    refusal: >
+      Resubmitting is yours to do - I'll open the request. Worth checking the reason it came back
+      first; I can read that out.
+
+    authorization:
+      gate: ROLE
+      roles: [CAMPAIGN_MANAGER, AD_PARTNER_ADMIN]
+      scope: "The MAKER only."
+      verified_against: "POST /api/v1/approvals/{referenceCode}/resubmit exists on the live BFF"
+
+    execution:
+      method: NONE
+      path: "/api/v1/approvals/{referenceCode}/resubmit"
+      layer: frontend
+      state_changing: true
+      note: "No request body. Returns the request to currentStage 1 of totalStages."
+
+    preconditions:
+      - "The request must have been sent back - a rejected request is terminal and cannot be resubmitted."
+
+    gotchas:
+      - >
+        Resubmission restarts the stages. On a two-stage config, an approval already given at stage
+        1 does not carry over - say so, because it changes who has to act again.
+      - >
+        D10 - absent from the designs, and the one most likely to be asked about, since a sent-back
+        request is visibly stuck until someone knows this button exists.
+
+    status: pending_verification
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # NAVIGATE
+  # ─────────────────────────────────────────────────────────────────────────
+
+  - id: campaign.open
+    label: Open a campaign
+    genie_mode: navigate
+    mutating: false
+    target_screen: campaign_detail
+    utterances:
+      - open the campaign
+      - take me to my campaign
+      - show me the campaign page
+      - go to campaign details
+
+    follow_ups:
+      - id: which_campaign_to_open
+        kind: entity_choice
+        when: "Several campaigns match the name."
+        question: "Which one?"
+        options_from: "campaigns matching the name, for brands this user can see"
+        default_after_asks: null
+        max_asks: 1
+        resolved_by_context: [campaign_detail]
+        status: pending_verification
+
+    authorization:
+      gate: PERMISSION
+      permission: VIEW_CAMPAIGN
+
+    execution:
+      state_changing: false
+      method: NONE
+      layer: frontend
+
+    gotchas:
+      - >
+        Campaigns live under a brand - /brands/{brandId}/campaigns/{campaignId}. There is no
+        top-level campaigns route, so the brand must be resolved first.
+
+    status: verified
+    verified_against: "Ontology screen campaign_detail"
+
+  - id: campaign.open_wizard
+    label: Start a new campaign
+    genie_mode: navigate
+    mutating: false
+    target_screen: launch_campaign
+    utterances:
+      - start a new campaign
+      - open the launch wizard
+      - I want to create a campaign
+      - take me to campaign creation
+    authorization:
+      gate: PERMISSION
+      permission: CREATE_CAMPAIGN
+    execution:
+      state_changing: false
+      method: NONE
+      layer: frontend
+    gotchas:
+      - >
+        Prefer campaign.plan when the user has given any constraints - opening an empty wizard when
+        they said "plan a 5 lakh campaign" wastes what they already told you.
+    status: verified
+    verified_against: "Ontology screen launch_campaign"

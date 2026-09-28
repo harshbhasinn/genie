@@ -1,0 +1,799 @@
+screen:
+  id: command_centre
+  title: Command Centre
+  route: /command-centre
+  nav_label: Command Centre          # R5: the Wallet frame's nav says "Screen Management" for a sibling tab
+  audience: [AD_PARTNER_ADMIN, CAMPAIGN_MANAGER]
+  source_frame: "Agency Admin Dashboard (1.5).docx — image1 (admin), image11 (campaign manager)"
+  purpose: >
+    The agency's home. Network scale and audience, how revenue splits between the two selling
+    motions, delivery and pricing, business health (money in, owed, kept), and where the screens
+    and demand are concentrated.
+  entities: [client, brand, campaign, device, wallet]
+
+  filters:
+    - id: period
+      label: Period
+      default: this_month
+      unset_means: "Never unset — the screen always carries a period. Genie must echo the resolved window."
+    - id: city
+      label: Filters › City
+      default: null
+      unset_means: All cities in the agency's contracted network
+
+  related_screens: [brand_management, inventory_management, wallet_management, team_management]
+
+  sections:
+    - id: needs_attention
+      label: Needs your attention
+      subtitle: "Alert strip with inline actions. This is the Advisor surface (ARCHITECTURE.md §3)."
+      metrics: [wallet_runway_days, platform_invoice]
+    - id: network_audience
+      label: Network & Audience
+      subtitle: camera-measured, whole network
+      metrics: [live_screens, monthly_spot_inventory_utilised, targeting_capable_share,
+                network_reach, avg_attention, avg_dwell, verified_impressions]
+    - id: revenue_by_motion
+      label: Revenue by Motion
+      subtitle: how the total splits — reserved vs auction
+      metrics: [broadcasting_revenue, targeted_revenue]
+    - id: delivery_pricing
+      label: Delivery & Pricing
+      subtitle: network level
+      metrics: [impressions_delivered, avg_broadcasting_cpm, avg_targeted_cpm, blended_yield_per_1000]
+    - id: programmatic_auction
+      label: Programmatic auction
+      subtitle: monetising the empty, camera-matched slots
+      metrics: [matched_avails, won_and_filled, unsold_matched_opportunity, yield_target_vs_broadcast]
+    - id: screen_intelligence
+      label: AdGrid Screen Intelligence
+      subtitle: the measurement layer that makes targeting & verification possible
+      metrics: [intelligence_efficiency]
+    - id: business_health
+      label: Business Health
+      subtitle: money in, owed, kept — both models
+      metrics: [wallet_balance, gross_billing, gross_profit, platform_invoice,
+                active_campaigns, brands_managed, screen_uptime, share_of_voice]
+    - id: distribution
+      label: Audience, fill and distribution
+      metrics: [audience_profile, fill_rate_by_section, location_distribution,
+                daypart_occupancy, top_brands]
+
+  metrics:
+
+    # ─────────────────────────────────────────────────────────────────────
+    # VERIFIED-PENDING: definition transcribed verbatim from the annotation
+    # cards. Needs checking against the computing code before it is served.
+    # ─────────────────────────────────────────────────────────────────────
+
+    - id: network_reach
+      label: Network Reach
+      definition: >
+        Unique people the network can put an ad in front of per day — camera-counted footfall,
+        not an estimate.
+      formula: "Σ (footfall per screen/day), de-duplicated ≈ 300 footfall/screen/day × 50,000 screens"
+      unit: count
+      camera_measured: true
+      freshness: batch_6h
+      deck_value: "15.0M"
+      gotchas:
+        - >
+          CONTRACT v3.1 SECTION 5 - /dashboard/audience is scoped by the STORE OWNER and serves a NETWORK_PARTNER only. 'The ad-partner and LESSPAY_MERCHANT dashboards are separate products. The columns exist so those can reuse this data later, but nothing here serves them.' An agency owns no stores, so this endpoint is not available to it. This reverses the 2026-09-24 reading that clientId on AudienceDashboardRequest meant agency scope - the request field is shared, the column the backend applies it to is not.
+        - >
+          R33 - /dashboard/content returns `reach` for the creative owner, which IS available to an agency, but it answers a different question: distinct people who saw YOUR creatives on the single best day, not the network's addressable audience per day. It is also deliberately conservative - 'the largest single day, since daily reach cannot be summed'. Whether the Command Centre card should show that instead is a design decision, not a mapping.
+        - >
+          R12 - this is the window-UNIQUE figure, de-duplicated across the window. Divide by windowDays for a daily rate; never multiply a daily rate up to a month, which double-counts returning visitors.
+      status: blocked
+      blocked_by: [R7, R33]
+      blocked_note: >
+        Network-wide addressable reach is a store-owner figure. An ad partner can only ever see who saw its own creatives, and only as a best-single-day number.
+
+    - id: avg_attention
+      source:
+        api: "POST /api/v1/dashboard/content"
+        method: POST
+        scope_key: client_id
+        field: "avgAttention"
+        params:
+          clientId: required
+          start: required
+          end: required
+      label: Avg Attention
+      definition: >
+        Of the people present at a screen, the share who actually turned to look at it.
+      formula: "faces looking ÷ faces present (on-device CV)"
+      unit: percent
+      camera_measured: true
+      freshness: batch_6h
+      deck_value: "70%"
+      gotchas:
+        - >
+          R16 - a 0-1 ratio, not a count and not a percent-typed field. Render it as a percentage but never confuse it with 'verified viewers', which is a count.
+      status: pending_verification
+
+    - id: avg_dwell
+      source:
+        api: "POST /api/v1/dashboard/content"
+        method: POST
+        scope_key: client_id
+        field: "avgDwellS"
+        params:
+          clientId: required
+          start: required
+          end: required
+      label: Avg Dwell
+      definition: How long, on average, a viewer stays within view of a screen.
+      formula: "Σ dwell seconds ÷ viewers"
+      unit: seconds
+      camera_measured: true
+      freshness: batch_6h
+      deck_value: "75s"
+      gotchas:
+        - >
+          Seconds. dwellByCohortZone on the same response breaks the figure down by cohort and zone.
+        - >
+          The deck's card adds "on a 120s loop, a viewer can catch ~1–2 spots". Loop density is
+          per-cell (BillingCostCell.loops_per_time_slot), not a constant — see S0-ANSWERS.md R3.
+          Reword as illustrative or make it cell-aware.
+      status: pending_verification
+
+    - id: verified_impressions
+      label: Verified Impressions
+      definition: >
+        Share of served impressions the camera confirmed a real, present person actually saw —
+        proof-of-attention, not just proof-of-play.
+      formula: "confirmed-seen ÷ served"
+      unit: percent
+      camera_measured: true
+      freshness: batch_6h
+      deck_value: "89%"
+      gotchas:
+        - >
+          ContentWindowResponse carries impressions and totalViews, but nothing states that totalViews is the camera-confirmed subset, so the ratio cannot be derived safely.
+      status: blocked
+      blocked_by: [R7]
+      blocked_note: >
+        No field returns a camera-confirmed share. Guessing at impressions over totalViews would put an invented percentage next to real ones.
+
+    - id: impressions_delivered
+      source:
+        api: "POST /api/v1/dashboard/content"
+        method: POST
+        scope_key: client_id
+        field: "impressions"
+        params:
+          clientId: required
+          start: required
+          end: required
+      label: Impressions Delivered
+      definition: Total ad-views served per day across both motions.
+      formula: "network reach/day × avg ad-views per visitor (deck: 15.0M × 2.8 ≈ 42.0M/day)"
+      unit: per_day
+      camera_measured: true
+      freshness: batch_6h
+      deck_value: "42.0 M/day"
+      gotchas:
+        - >
+          R18 - one name, 'Impressions'. This is the window total; divide by windowDays for the per-day figure the card shows.
+        - "Derived from network_reach, so it inherits whatever R7 settles."
+      status: pending_verification
+
+    - id: avg_broadcasting_cpm
+      source:
+        api: "GET /api/v1/client-rate-cards"
+        method: GET
+        scope_key: client_id
+        field: "imageCpm, videoCpm"
+        params:
+          parentClientId: required
+          clientId: required
+          city: required
+          shopType: required
+          rateCardType: required
+      label: Avg Broadcasting CPM
+      definition: Blended price per 1,000 broadcast impressions across static and video.
+      formula: "Premium and Standard rates weighted by the sold mix (deck: ₹110 & ₹80 ≈ ₹95 / 1,000)"
+      unit: cpm_inr
+      freshness: live
+      deck_value: "₹95"
+      gotchas:
+        - >
+          The rate card gives the PRICE, not the achieved average. Weighting it by the sold image/video mix is Genie's own arithmetic and must be labelled as such.
+        - >
+          This is the AP-to-Brand card. Never surface the AdGrid-to-AP side - that is the agency's own cost basis.
+        - >
+          POLICY 2026-09-24 - resolved in favour of the API/backend over the design. See RESOLUTION-POLICY.md.
+          Command Centre figures are blended across tiers and should be labelled so. Tier is fixed per campaign.
+        - "The ₹110/₹80 rates are the deck's illustration. Real rates come from the rate cards."
+      status: pending_verification
+
+    - id: avg_targeted_cpm
+      source:
+        api: "POST /api/v1/campaigns/targeted-rate-check"
+        method: POST
+        scope_key: client_id
+        field: "imageFloorCpm, videoFloorCpm"
+      label: Avg Targeted CPM
+      definition: Average price per 1,000 targeted impressions that actually cleared the auction.
+      formula: "floor + competitive uplift (deck: ₹167 + ~20% = ₹201 clearing)"
+      unit: cpm_inr
+      freshness: live
+      deck_value: "₹201"
+      gotchas:
+        - >
+          This is the FLOOR, not the clearing price. The auction clears above the floor only when demand competes, and nothing on this surface returns what actually cleared. Say 'floor' every time.
+        - >
+          averaging says which mean produced it - SIMPLE or DEVICE_WEIGHTED. Quote it; the two differ materially on a lopsided city mix.
+      status: pending_verification
+
+    - id: blended_yield_per_1000
+      source:
+        api: "DERIVED - GET /api/v1/revenue-breakdown/{apId} kpis.totalRevenue over POST /api/v1/dashboard/content impressions, times 1000"
+        method: NONE
+        scope_key: client_id
+        field: "kpis.totalRevenue and impressions"
+      label: Blended yield / 1,000
+      definition: What the network earns per 1,000 impressions across both motions combined.
+      formula: "total revenue ÷ total impressions × 1,000"
+      unit: cpm_inr
+      freshness: live
+      deck_value: "₹116"
+      gotchas:
+        - >
+          Two endpoints, two windows. Genie must request the same start and end on both or the ratio is meaningless.
+        - >
+          R14 - blended across tiers, because the Command Centre has no Premium/Standard toggle. Label it blended.
+        - "Sits between the broadcast and targeted CPMs, weighted by the revenue split (deck: 80/20)."
+      status: pending_verification
+
+    - id: wallet_balance
+      source:
+        api: "GET /api/v1/clients/{clientId}/wallet/kpis"
+        method: GET
+        scope_key: client_id
+        field: "apRemaining - the same figure as balance on /wallet/balance"
+      label: Wallet Balance · Rev-Share
+      definition: Prepaid credit that funds revenue-share consumption as campaigns run.
+      formula: "top-ups − consumption"
+      unit: currency_inr
+      freshness: live
+      deck_value: "₹15,75,000"
+      gotchas:
+        - >
+          POLICY 2026-09-24 - R4 resolved to the MAIN agency wallet. Sub-wallet money is committed, not available; counting it would make the runway alert fire late.
+        - >
+          The same response carries runwayMonths, lowBalance and lowBalanceThreshold, all computed by the backend - the advisor reads them rather than deriving its own.
+      status: pending_verification
+
+    - id: wallet_runway_days
+      source:
+        api: "GET /api/v1/clients/{clientId}/wallet/kpis"
+        method: GET
+        scope_key: client_id
+        field: "runwayMonths"
+      label: Wallet runway
+      definition: How many days the current balance lasts at the recent burn rate.
+      formula: "balance ÷ burn per day"
+      unit: days
+      freshness: live
+      deck_value: "~6 days (burn ₹2.6L/day)"
+      gotchas:
+        - >
+          POLICY 2026-09-24 - resolved in favour of the API/backend over the design. See RESOLUTION-POLICY.md.
+          Backend computes runwayMonths and lowBalance. Check the unit before quoting.
+        - "Drives the wallet_runway advisor. Threshold is config, not a literal."
+      status: pending_verification
+
+    - id: gross_billing
+      source:
+        api: "GET /api/v1/revenue-breakdown/{apId}"
+        method: GET
+        scope_key: client_id
+        field: "kpis.totalRevenue"
+        params:
+          from: required
+          to: required
+      label: Gross Billing / Revenue
+      definition: Total billing booked this month across every running campaign.
+      formula: "Σ campaign value; splits into broadcast + targeted"
+      unit: currency_inr
+      freshness: live
+      deck_value: "₹2.76 Cr (= ₹2.21 Cr broadcast + ₹0.55 Cr targeted)"
+      gotchas:
+        - >
+          The deck splits this into broadcast and targeted. The response does not - see broadcasting_revenue.
+      status: pending_verification
+
+    - id: gross_profit
+      source:
+        api: "GET /api/v1/revenue-breakdown/{apId}"
+        method: GET
+        scope_key: client_id
+        field: "kpis.netRevenue, with the margin at kpis.marginPct"
+        params:
+          from: required
+          to: required
+      label: Gross Profit
+      definition: What the agency keeps after AdGrid's platform cost.
+      formula: "gross billing − platform cost; margin = gross profit ÷ gross billing"
+      unit: currency_inr
+      freshness: live
+      deck_value: "₹1.57 Cr (56.9% after ₹1.19 Cr platform cost)"
+      gotchas:
+        - >
+          This is the difference between the two legs simulate-cost returns
+          (ad_partner_to_brand minus adgrid_to_ad_partner). The per-cell AdGrid-leg breakdown is
+          marked INTERNAL and must not be narrated — see S0-ANSWERS.md B2.
+      status: pending_verification
+
+    - id: platform_invoice
+      source:
+        api: "GET /api/v1/clients/{clientId}/wallet/kpis"
+        method: GET
+        scope_key: client_id
+        field: "adgridRevenue, with unpaid for the outstanding part"
+      label: Platform Invoice
+      definition: What AdGrid bills the agency this cycle — revenue-share plus screen rental.
+      formula: "RevShare consumption + screen rental"
+      unit: currency_inr
+      freshness: live
+      deck_value: "₹42.0L"
+      gotchas:
+        - >
+          GET /api/v1/billing/settlement-summary carries the same money as total, paid and unpaid when the view needs the paid share too.
+        - "Drives the invoice_due advisor. The deck shows a due date on the alert strip."
+
+    # ─────────────────────────────────────────────────────────────────────
+    # PENDING TRANSCRIPTION: present on the screen, annotation card not yet
+    # read. Label and on-screen subtitle captured; definition outstanding.
+    # ─────────────────────────────────────────────────────────────────────
+      status: pending_verification
+
+    - id: live_screens
+      source:
+        api: "GET /api/v1/clients/{clientId}/devices/roster"
+        method: GET
+        scope_key: client_id
+        field: "totalElements with status=ONLINE"
+        params:
+          clientId: required
+          status: required
+          cityCode: required
+          page: required
+          size: required
+      definition: "Screens in the contracted network that are powered on and reporting."
+      unit: count
+      freshness: unknown
+      label: Live Screens
+      deck_value: "50,000 · 99.4% online · across 6 cities · on 3 Contracts"
+      gotchas:
+        - >
+          Read totalElements off the page envelope - do not count rows, which are one page deep.
+        - >
+          R8 - 'Live', not 'Active'. Contracted screens are the same call without the status filter.
+        - >
+          POLICY 2026-09-24 - definition taken from the deck's annotation card, with the backend's vocabulary where they differ. See RESOLUTION-POLICY.md.
+        - >
+          'Live', not 'Active' - and distinct from Contracted, which is what the agency may buy on.
+      status: pending_verification
+
+    - id: monthly_spot_inventory_utilised
+      source:
+        api: "POST /api/v1/inventory/heatmap"
+        method: POST
+        scope_key: client_id
+        field: "kpis.imageSlotsFree over imageSlotsTotal, and videoSlotsFree over videoSlotsTotal"
+      definition: "Share of the month's sellable ad slots already sold."
+      formula: "slots sold / slots available"
+      unit: percent
+      freshness: unknown
+      label: Monthly Spot Inventory — Utilised
+      deck_value: "56% Utilised · 22M Available"
+      gotchas:
+        - >
+          Utilisation is one minus free over total, and image and video are separate ladders - combining them needs the sold mix and should be labelled.
+        - >
+          loopTiers gives maxImage and maxVideo per loop length, so a slot on a 120s premium screen is not the same unit as one on a 60s standard screen.
+        - >
+          POLICY 2026-09-24 - definition taken from the deck's annotation card, with the backend's vocabulary where they differ. See RESOLUTION-POLICY.md.
+        - >
+          Loop capacity differs by tier - 120s premium, 60s standard - so a slot means different things on each.
+      status: pending_verification
+
+    - id: targeting_capable_share
+      source:
+        api: "GET /api/v1/clients/{clientId}/devices/roster"
+        method: GET
+        scope_key: client_id
+        field: "deviceVariant across the roster"
+        params:
+          clientId: required
+          page: required
+          size: required
+      definition: "Share of screens with a camera and on-device intelligence, so audience targeting can reach them."
+      formula: "targeting-capable screens / total screens"
+      unit: percent
+      freshness: unknown
+      label: Targeting Capable | Camera + Intelligence
+      deck_value: "86% · 21M Available"
+      gotchas:
+        - >
+          R31 - the design defines targeting-capable as 'has a camera'. The API's own targeting path counts NON_PREMIUM devices instead: targeted-rate-check reports noInventoryCells as 'cells this client holds no NON_PREMIUM devices in'. Until someone confirms the two sets are identical, Genie says which it counted.
+        - >
+          POLICY 2026-09-24 - definition taken from the deck's annotation card, with the backend's vocabulary where they differ. See RESOLUTION-POLICY.md.
+        - >
+          This is the pool a Targeted campaign can serve into.
+      status: pending_verification
+
+    - id: broadcasting_revenue
+      definition: "Revenue from reserved share-of-voice campaigns, sold ahead at a fixed CPM."
+      unit: currency_inr
+      freshness: live
+      label: Broadcasting
+      deck_value: "₹2.21 Cr (80% of revenue) · collected ₹1.6 Cr · outstanding ₹0.61 Cr · CPM ₹95 · utilisation 56% · 31 campaigns"
+      gotchas:
+        - >
+          RevenueBreakdownResponse gives kpis, brands and monthlyTrend - no split by selling motion, so reserved share-of-voice revenue cannot be separated out.
+        - >
+          POLICY 2026-09-24 - definition taken from the deck's annotation card, with the backend's vocabulary where they differ. See RESOLUTION-POLICY.md.
+        - >
+          Broadcasting reserves slots on chosen screens. The other motion, Targeted, is an auction.
+      status: blocked
+      blocked_by: [R7]
+      blocked_note: >
+        Revenue comes back as one number. Nothing on this surface splits it by broadcasting versus targeted.
+
+    - id: targeted_revenue
+      definition: "Revenue from the programmatic auction, billed per won camera-matched impression."
+      unit: currency_inr
+      freshness: live
+      label: Targeted
+      deck_value: "₹0.55 Cr · collected ₹0.40 Cr · outstanding ₹0.15 Cr · clearing CPM ₹201 · fill/win 38% · 11 campaigns"
+      gotchas:
+        - >
+          RevenueBreakdownResponse gives kpis, brands and monthlyTrend - no split by selling motion, so auction revenue cannot be separated out.
+        - >
+          POLICY 2026-09-24 - definition taken from the deck's annotation card, with the backend's vocabulary where they differ. See RESOLUTION-POLICY.md.
+        - >
+          Postpaid - nothing is charged at confirm, unlike Broadcasting.
+      status: blocked
+      blocked_by: [R7]
+      blocked_note: >
+        Revenue comes back as one number. Nothing on this surface splits it by broadcasting versus targeted.
+
+    - id: matched_avails
+      definition: "Biddable impressions per day on camera-capable screens - supply the auction could fill."
+      unit: per_day
+      freshness: unknown
+      label: Matched avails
+      deck_value: "2.4 M/day · biddable · on 32k capable screens"
+      gotchas:
+        - >
+          No endpoint in the BFF returns this. It is an auction-side measure, and the auction is not exposed on this surface at all - see RESOLUTION-POLICY.md: the BFF serves configuration and commerce well, and delivery measurement for ad partners not at all.
+        - >
+          POLICY 2026-09-24 - definition taken from the deck's annotation card, with the backend's vocabulary where they differ. See RESOLUTION-POLICY.md.
+      status: blocked
+      blocked_by: [R7]
+      blocked_note: >
+        Auction supply and clearing figures are not served on the dashboard BFF at all.
+
+    - id: won_and_filled
+      definition: "Matched avails actually won and served."
+      unit: per_day
+      freshness: unknown
+      label: Won & filled
+      deck_value: "0.9 M/day · 38% fill"
+      gotchas:
+        - >
+          No endpoint in the BFF returns this. It is an auction-side measure, and the auction is not exposed on this surface at all - see RESOLUTION-POLICY.md: the BFF serves configuration and commerce well, and delivery measurement for ad partners not at all.
+        - >
+          POLICY 2026-09-24 - definition taken from the deck's annotation card, with the backend's vocabulary where they differ. See RESOLUTION-POLICY.md.
+        - >
+          Fill rate is this divided by matched avails.
+      status: blocked
+      blocked_by: [R7]
+      blocked_note: >
+        Auction supply and clearing figures are not served on the dashboard BFF at all.
+
+    - id: unsold_matched_opportunity
+      definition: "Matched avails that went unsold - biddable supply nobody bought."
+      formula: "matched avails - won and filled"
+      unit: per_day
+      freshness: unknown
+      label: Unsold matched opportunity
+      deck_value: "1.5 M/day · ~₹3.0L/day · ₹90L/mo at ₹201"
+      gotchas:
+        - >
+          No endpoint in the BFF returns this. It is an auction-side measure, and the auction is not exposed on this surface at all - see RESOLUTION-POLICY.md: the BFF serves configuration and commerce well, and delivery measurement for ad partners not at all.
+        - >
+          POLICY 2026-09-24 - definition taken from the deck's annotation card, with the backend's vocabulary where they differ. See RESOLUTION-POLICY.md.
+        - >
+          The revenue case for the targeted motion: unsold slots on camera screens earn nothing.
+      status: blocked
+      blocked_by: [R7]
+      blocked_note: >
+        Auction supply and clearing figures are not served on the dashboard BFF at all.
+
+    - id: yield_target_vs_broadcast
+      definition: "How much more a targeted impression earns than a broadcast one."
+      formula: "targeted clearing CPM / broadcast CPM"
+      unit: multiplier
+      freshness: live
+      label: Yield target vs broadcast
+      deck_value: "2.1× (₹201 targeted vs ₹95 broadcast)"
+      gotchas:
+        - >
+          No endpoint in the BFF returns this. It is an auction-side measure, and the auction is not exposed on this surface at all - see RESOLUTION-POLICY.md: the BFF serves configuration and commerce well, and delivery measurement for ad partners not at all.
+        - >
+          POLICY 2026-09-24 - definition taken from the deck's annotation card, with the backend's vocabulary where they differ. See RESOLUTION-POLICY.md.
+      status: blocked
+      blocked_by: [R7]
+      blocked_note: >
+        Auction supply and clearing figures are not served on the dashboard BFF at all.
+
+    - id: intelligence_efficiency
+      definition: "Headline score for the measurement layer - detection, classification and attention accuracy combined."
+      unit: percent
+      freshness: unknown
+      label: Intelligence Efficiency
+      deck_value: "97% · person detection F1 96.8% · age/gender 92.4% · attention/gaze 94.1% · impression verification 96.2% · targeting-capable 32,000/50k"
+      gotchas:
+        - >
+          A composite of detection, classification and attention accuracy. Nothing returns any of the three, let alone the blend.
+        - >
+          POLICY 2026-09-24 - definition taken from the deck's annotation card, with the backend's vocabulary where they differ. See RESOLUTION-POLICY.md.
+        - >
+          Detection, classification and discard all happen on the screen; no images or identities leave it.
+        - >
+          The panel carries a privacy statement: "Detected, classified & discarded on the box —
+          no images or identities leave the screen." Genie should be able to repeat this accurately;
+          it is the most likely question from a brand.
+      status: blocked
+      blocked_by: [R7]
+      blocked_note: >
+        No endpoint returns a measurement-quality score. Genie can explain what it means and say the number is not served.
+
+    - id: active_campaigns
+      source:
+        api: "GET /api/v1/clients/{clientId}/dashboard"
+        method: GET
+        scope_key: client_id
+        field: "overviewStats.activeCampaignCount"
+      label: Active campaigns
+      unit: count
+      freshness: live
+      deck_value: "42 (12 paused)"
+      gotchas:
+        - >
+          'Live' campaigns per R13. totalCampaignCount on the same section counts every campaign in every state, DRAFT included.
+        - >
+          RULED 2026-09-21: the label is "Live campaigns", not "Active" - "Active" is a design typo
+          for the backend's LIVE state (R13/R17). Paused campaigns are excluded; PAUSED is a
+          separate computed status.
+      status: pending_verification
+
+    - id: brands_managed
+      source:
+        api: "GET /api/v1/clients/{clientId}/dashboard"
+        method: GET
+        scope_key: client_id
+        field: "overviewStats.brandCount"
+      definition: "Brands under this agency."
+      unit: count
+      freshness: live
+      label: Brands managed
+      deck_value: "18 (+3 this month)"
+      gotchas:
+        - >
+          GET /api/v1/analytics/{apId}/brands returns the same count as totalBrands plus a card per brand - use that one when the answer needs names.
+        - >
+          POLICY 2026-09-24 - definition taken from the deck's annotation card, with the backend's vocabulary where they differ. See RESOLUTION-POLICY.md.
+        - >
+          An agency is an AD_PARTNER; its brands are BRAND_UNDER_AD_PARTNER and cannot create campaigns themselves.
+      status: pending_verification
+
+    - id: screen_uptime
+      source:
+        api: "GET /api/v1/analytics/devices/{deviceId}/uptime"
+        method: GET
+        scope_key: client_id
+        field: "summary, with buckets for the trend"
+        params:
+          deviceId: required
+          from: required
+          to: required
+          granularity: required
+      definition: "Share of scheduled playtime the screens were actually up, from proof-of-play."
+      unit: percent
+      freshness: unknown
+      label: Screen uptime
+      deck_value: "97.4% · 7-day proof-of-play"
+      gotchas:
+        - >
+          Per device only. A network figure means fanning out over the roster and averaging, which Genie must not do silently - either say it is an average over N screens, or answer for one screen.
+        - >
+          POLICY 2026-09-24 - definition taken from the deck's annotation card, with the backend's vocabulary where they differ. See RESOLUTION-POLICY.md.
+      status: pending_verification
+
+    - id: share_of_voice
+      source:
+        api: "POST /api/v1/inventory/heatmap"
+        method: POST
+        scope_key: client_id
+        field: "grid, against loopTiers capacity"
+      definition: "Share of each loop this agency's campaigns occupy, averaged across screen sections."
+      unit: percent
+      freshness: unknown
+      label: Share of voice
+      deck_value: "62% · avg across sections"
+      gotchas:
+        - >
+          Share of voice is this client's slots over the loop's capacity. A client's share of a screen is fixed when its contract starts - clients never compete for the same slots, so this does not move with anyone else's buying.
+        - >
+          POLICY 2026-09-24 - definition taken from the deck's annotation card, with the backend's vocabulary where they differ. See RESOLUTION-POLICY.md.
+        - >
+          A client's share of a screen is fixed when its contract starts - clients never compete for the same slots.
+      status: pending_verification
+
+    - id: audience_profile
+      label: Audience Profile
+      definition: "Who's in front of the screens — anonymous and aggregate."
+      unit: percent
+      camera_measured: true
+      freshness: batch_6h
+      deck_value: "Male 53% (≈7.9M/day) · Female 47% (≈7.1M/day) · 18–24 19% · 25–34 34% · 35–44 25% · 45–54 15% · 55+ 7%"
+      gotchas:
+        - >
+          CONTRACT v3.1 SECTION 5 - /dashboard/audience is scoped by the STORE OWNER and serves a NETWORK_PARTNER only. 'The ad-partner and LESSPAY_MERCHANT dashboards are separate products. The columns exist so those can reuse this data later, but nothing here serves them.' An agency owns no stores, so this endpoint is not available to it. This reverses the 2026-09-24 reading that clientId on AudienceDashboardRequest meant agency scope - the request field is shared, the column the backend applies it to is not.
+        - >
+          R15 still holds for whoever does get this: four opaque bucket keys, now labelled 18-25, 26-35, 36-50 and 51+, rendered exactly as returned and never re-bucketed.
+        - >
+          PARTIAL ALTERNATIVE - /dashboard/content returns dwellByCohortZone, keyed '<ageBucket>|<gender>' such as '26-35|F'. That exposes the same demographic axes to an agency, but as DWELL SECONDS per cohort per zone, not as a share of people. It answers 'which cohorts engaged with my creatives', not 'who is in front of the screens'. It is also SPARSE: an absent pair means no data, never zero.
+        - >
+          R15 - reporting bands are whatever keys the API returns, rendered exactly as returned. Never re-bucket them into the wizard's five targeting bands.
+        - >
+          suppressed is a real state and means suppressed, never zero. When it is true, reason says why - the k-anonymity floor is 10.
+        - >
+          POLICY 2026-09-24 - resolved in favour of the API/backend over the design. See RESOLUTION-POLICY.md.
+          Reporting uses the API's four opaque bucket keys, rendered exactly as returned. Targeting's five bands are a separate concept.
+        - >
+          R15 - the backend ships FOUR age buckets (18-25, 26-35, 36-50, 50+) while this screen
+          shows FIVE (18-24, 25-34, 35-44, 45-54, 55+). Different count and different boundaries.
+        - >
+          Bucket keys are OPAQUE STRINGS. "50+" actually holds 51+ (first match wins, so a
+          50-year-old lands in 36-50). A relabel to "51+" is planned. Never parse a bucket label
+          to infer its range.
+      status: blocked
+      blocked_by: [R7]
+      blocked_note: >
+        genderSplit, ageDistribution and hourRhythm exist only on the store-owner endpoint. No population demographic is served to an ad partner.
+
+    - id: fill_rate_by_section
+      source:
+        api: "POST /api/v1/inventory/heatmap"
+        method: POST
+        scope_key: client_id
+        field: "grid"
+      definition: "Sold share of avails, split by position in the loop."
+      unit: percent
+      freshness: unknown
+      label: Fill Rate by Section
+      deck_value: "Top · Hero 58% · Bottom · Showcase 42%"
+      gotchas:
+        - >
+          grid is untyped in the spec, so whether it carries the zone axis - HERO, PROMO_STRIP, SHOWCASE - has to be confirmed against a live response before this is served.
+        - >
+          POST /api/v1/dashboard/content-performance returns zones[] for PERFORMANCE by zone, which is a different question from how full each zone is.
+        - >
+          POLICY 2026-09-24 - definition taken from the deck's annotation card, with the backend's vocabulary where they differ. See RESOLUTION-POLICY.md.
+        - >
+          Zones are HERO, PROMO_STRIP and SHOWCASE. The deck's 'Top' and 'Bottom' map onto these.
+      status: pending_verification
+
+    - id: location_distribution
+      source:
+        api: "GET /api/v1/store-overview/{clientId}/location-distribution"
+        method: GET
+        scope_key: client_id
+        field: "cities[], with totalScreens for the denominator"
+      definition: "Screens, billings and growth by city."
+      unit: count
+      freshness: unknown
+      label: Location Distribution
+      deck_value: "Delhi 12,500 · Greater Noida 10,500 · Noida 9,000 · Gurgaon 8,500 · Faridabad 5,000 · Ghaziabad 4,500"
+      gotchas:
+        - >
+          The spec collapses several row shapes onto one anonymous schema named Row, so the city row's real fields cannot be confirmed statically. Read a live response before serving this.
+        - >
+          City codes are DEL, GGN, NOI, with FBD, GBD and GND to be added. GGN renders as Gurugram.
+        - >
+          POLICY 2026-09-24 - definition taken from the deck's annotation card, with the backend's vocabulary where they differ. See RESOLUTION-POLICY.md.
+        - >
+          City codes: DEL, GGN, NOI, plus FBD, GBD, GND to be added. GGN renders as Gurugram.
+        - >
+          City naming is inconsistent across the product — this widget says "Gurgaon" while the
+          AdGuide plan card says "Gurugram". One of them must win before Genie names cities.
+      status: pending_verification
+
+    - id: daypart_occupancy
+      source:
+        api: "POST /api/v1/inventory/heatmap"
+        method: POST
+        scope_key: client_id
+        field: "grid"
+      label: Daypart Occupancy
+      definition: "Fill rate by time-of-day."
+      unit: percent
+      freshness: unknown
+      deck_value: "Morning (6a–12p) 48% · Afternoon (12–5p) 61% · Evening (5–10p) 78% · Night (10p–6a) 39%"
+      gotchas:
+        - >
+          Same untyped-grid caveat as fill_rate_by_section. Dayparts are MORNING 10-13, AFTERNOON 13-16, EVENING 16-19, NIGHT 19-22.
+        - >
+          A daypart stays bookable until it ends, so today's later dayparts are usually still sellable.
+        - >
+          POLICY 2026-09-24 - resolved in favour of the API/backend over the design. See RESOLUTION-POLICY.md.
+          Bands are 10-13 / 13-16 / 16-19 / 19-22 over a 10:00-22:00 day. The Command Centre chart is being corrected.
+      status: pending_verification
+
+    - id: top_brands
+      source:
+        api: "GET /api/v1/revenue-breakdown/{apId}"
+        method: GET
+        scope_key: client_id
+        field: "brands[] - brandId, brandName, revenue"
+        params:
+          from: required
+          to: required
+      definition: "Brands ranked by billings this month."
+      unit: currency_inr
+      freshness: live
+      label: Top Brands
+      deck_value: "Coca-Cola ₹58.0L · Samsung ₹49.0L · Airtel ₹41.0L · Titan ₹33.0L · boAt ₹26.0L"
+      gotchas:
+        - >
+          Ranked by revenue in the requested window. The deck's commercial-model column - Rev-Share, Rental, Mixed - is not on this response; it lives on the contract.
+        - >
+          POLICY 2026-09-24 - definition taken from the deck's annotation card, with the backend's vocabulary where they differ. See RESOLUTION-POLICY.md.
+        - >
+          Each row carries a commercial model - Rev-Share, Rental or Mixed.
+        - "Each row carries a commercial model: Rev-Share, Rental or Mixed."
+      status: pending_verification
+
+  actions:
+    - capability: wallet.request_funds
+      label: Top up
+      mutating: true
+      otp_gated: true
+      gate: PERMISSION
+      permission: TOPUP_WALLET
+      genie_mode: navigate
+      status: blocked
+      blocked_by: [R6]
+      blocked_note: >
+        Shown on the CAMPAIGN_MANAGER variant, but PermissionBundles grants that role neither
+        TOPUP_WALLET nor MARK_INVOICE_PAID. Either the bundle is wrong or the screen is.
+        WalletOpenServiceImpl uses OtpGrpcClient, so Genie can never complete this regardless.
+
+    - capability: invoice.settle
+      label: Settle
+      mutating: true
+      otp_gated: true
+      gate: UNKNOWN
+      permission: MARK_INVOICE_PAID
+      genie_mode: navigate
+      status: blocked
+      blocked_by: [R6]
+      blocked_note: >
+        Same as wallet.request_funds. Note MARK_INVOICE_PAID is one of the 8 permissions declared
+        but never used in an @RequireAccess (FINDINGS.md F1) — the real gate must be read from the
+        controller, not assumed.
+
+  notes:
+    - >
+      The CAMPAIGN_MANAGER variant (image11) is identical except that "Team Management" is absent
+      from the nav. It still shows the full Business Health financials and both alert actions.
+    - >
+      Mock values across frames are internally inconsistent (wallet balance, campaign counts).
+      deck_value is recorded for cross-checking only and is never served. Do not seed golden sets
+      from these numbers — see BUILD.md §5.4.

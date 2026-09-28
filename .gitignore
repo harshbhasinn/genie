@@ -1,0 +1,51 @@
+# ─── Never commit these. They hold live tenant data or credentials. ───────────
+#
+# sweep.py takes a real JWT and calls the QA BFF as a real user. Its input is a
+# credential and its output is another tenant's numbers. Neither belongs in git.
+*.jwt
+*.token
+tok.txt
+token.txt
+sweep-results.json
+sweep-*.json
+.env
+.env.*
+!.env.example
+
+# ─── The design deck ─────────────────────────────────────────────────────────
+#
+# 75 MB of embedded images, and git keeps every version of it forever. Three
+# reasons it stays out:
+#   - Figma is the canonical source; this is an export of it
+#   - everything in it is already transcribed into ontology/ — that was S1
+#   - RESOLUTION-POLICY.md ranks the deck BELOW the live API, so committing the
+#     lowest-precedence source at the highest storage cost is backwards
+#
+# If it ever does need versioning, use Git LFS rather than lifting this line:
+#   git lfs install && git lfs track "*.docx"
+Agency Admin Dashboard*.docx
+*.docx
+
+# ─── Python ──────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ─── Editors and OS ──────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ─── Scratch ─────────────────────────────────────────────────────────────────
+*.log
+scratch/
+tmp/

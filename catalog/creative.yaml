@@ -1,0 +1,200 @@
+domain: creative
+description: >
+  A brand's ad files and their review state. Creatives gate whether a campaign can be confirmed at
+  all - every requested slot needs one approved ad - so this domain answers a lot of "why can't I
+  launch" questions.
+
+capabilities:
+
+  - id: creative.explain_library
+    label: What's in the library
+    description: How many creatives a brand has, and what state each is in.
+    genie_mode: answer
+    mutating: false
+    otp_gated: false
+    utterances:
+      - how many creatives do I have
+      - what's in my creative library
+      - show me my ads
+      - how many videos are uploaded
+      - list my assets
+    answers_with: [creatives_total, creatives_approved, creatives_pending_review,
+                   creatives_rejected, creatives_by_format]
+
+    follow_ups:
+
+      - id: which_brand_creatives
+        kind: entity_choice
+        when: "The library is per-brand and no brand is in context."
+        question: "Which brand's library?"
+        options_from: "brands under this agency"
+        default_after_asks: null
+        max_asks: 1
+        resolved_by_context: [creative_library, brand_management, campaign_detail]
+        status: pending_verification
+
+    authorization:
+      gate: PERMISSION
+      permission: VIEW_CAMPAIGN
+
+    gotchas:
+      - >
+        reviewStatus is the gate that matters: a campaign goes LIVE only when every creative on it is approved. aiReasonCode and aiMessage say why the checker rejected one.
+      - >
+        liveInCampaignsCount tells you whether deleting a creative would affect a running campaign - worth saying before Genie hands off to a delete.
+      - >
+        There is no global library - creatives belong to the advertised brand. A creative attaches
+        to a campaign only if it belongs to that campaign's brand.
+
+    status: pending_verification
+
+    execution:
+      state_changing: false
+      method: GET
+      path: "/api/v1/analytics/{clientId}/library/creatives"
+      layer: bff
+      note: >
+        Analytics view of the library. GET /api/v1/clients/{clientId}/library/creatives is the plain listing.
+
+  - id: creative.explain_review_status
+    label: Why an ad is not approved yet
+    description: Where a creative sits in review, and what that blocks.
+    genie_mode: answer
+    mutating: false
+    utterances:
+      - why is my creative pending
+      - has my ad been approved
+      - what's holding up my creative
+      - why was my ad rejected
+      - when will my creative be reviewed
+      - can I use this creative yet
+
+    authorization:
+      gate: PERMISSION
+      permission: VIEW_CAMPAIGN
+
+    execution:
+      method: GET
+      path: "/api/v1/clients/{clientId}/library/creatives/{creativeId}"
+      layer: bff
+      state_changing: false
+
+    gotchas:
+      - >
+        The AI never rejects an ad. It either approves it or sends it to a person, and if it says
+        nothing within 5 minutes a person decides. So PENDING_REVIEW is a queue, not a verdict -
+        worth saying, because "pending" reads like a problem and usually is not.
+      - >
+        States are AWAITING_AI_VERDICT, APPROVED, PENDING_REVIEW, REJECTED. The library screen shows
+        three of these and omits AWAITING_AI_VERDICT.
+      - >
+        "Usable" means uploaded AND approved. Only usable ads can be attached, counted toward
+        completion, allocated to slots, or published.
+
+    status: pending_verification
+
+  - id: creative.explain_requirements
+    label: What makes a valid creative
+    description: Formats, durations and the guidelines.
+    genie_mode: answer
+    mutating: false
+    utterances:
+      - what size should my ad be
+      - what format do you accept
+      - how long can a video be
+      - what are the creative specs
+      - what are the design guidelines
+
+    authorization:
+      gate: NONE
+
+    execution:
+      state_changing: false
+      method: NONE
+      layer: genie
+      note: "Ontology, plus the Creative Guidelines panel once it is in the knowledge base."
+
+    gotchas:
+      - >
+        The Creative Library ships a Do's and Don'ts panel - lift it verbatim into the knowledge
+        base rather than paraphrasing it.
+      - >
+        Static is 10 seconds, video 15. Those are consistent across screens; the pixel dimensions
+        are not.
+
+    status: blocked
+    blocked_by: [D4]
+    blocked_note: >
+      Dimensions are transposed between screens - the Launch wizard says 1920x1080, the upload modal
+      and the AI-checker contract both say 1080x1920. Genie must not quote a size until it is fixed,
+      because the wrong answer means a rejected upload.
+
+  - id: creative.explain_launch_blocker
+    label: Why a campaign cannot launch
+    description: Which creatives are missing or unapproved, and what that prevents.
+    genie_mode: answer
+    mutating: false
+    utterances:
+      - why can't I activate this campaign
+      - what's blocking my launch
+      - why is the activate button disabled
+      - what do I still need before going live
+
+    authorization:
+      gate: PERMISSION
+      permission: VIEW_CAMPAIGN
+
+    execution:
+      method: GET
+      path: "/api/v1/campaigns/{campaignId}"
+      layer: bff
+      state_changing: false
+      note: "Sub-status and creative assignments show what is still missing."
+
+    gotchas:
+      - >
+        The Launch wizard's Final Checklist gives the answer directly - Details complete, Screens
+        selected, Creatives uploaded, All approved, Terms accepted. Report against it: "you're two
+        items short".
+      - >
+        Every requested slot needs one approved ad, per zone, before confirm. An unapproved library
+        is the most common reason a campaign cannot reach CREATIVES_COMPLETE.
+      - >
+        D2 - the wizard's Tip says you can activate with pending creatives. You cannot; the button
+        is correctly disabled and the tip is being corrected. Do not repeat the tip.
+
+    status: pending_verification
+
+  - id: creative.upload
+    label: Upload a creative
+    genie_mode: handoff
+    mutating: true
+    otp_gated: false
+    target_screen: creative_library
+    utterances:
+      - upload a new ad
+      - add a creative
+      - I want to upload a video
+      - put a new image in the library
+    refusal: >
+      I can't upload files, but I'll open the Creative Library with the upload panel ready - it's a
+      two-step flow and the file has to come from you.
+
+    authorization:
+      gate: PERMISSION
+      permission: UPLOAD_CREATIVE
+      client_operation: CAMPAIGN_WRITE
+
+    execution:
+      method: NONE
+      path: "/api/v1/clients/{clientId}/library/creatives/initiate-upload"
+      layer: frontend
+      state_changing: true
+      note: "Presigned direct-to-storage from the browser. Genie cannot hold a file."
+
+    gotchas:
+      - >
+        Not OTP-gated, but still a handoff - Genie cannot hold or transmit a file. The upload is a
+        presigned direct-to-storage flow from the browser.
+
+    status: pending_verification

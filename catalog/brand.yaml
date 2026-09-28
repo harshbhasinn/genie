@@ -1,0 +1,167 @@
+domain: brand
+description: >
+  The brands beneath this agency - their performance, their people, and their campaigns. Creating
+  a brand is OTP-gated; everything else here is a read.
+
+capabilities:
+
+  - id: brand.list
+    label: List brands
+    description: Brands under this agency, with campaign counts and billings.
+    genie_mode: answer
+    mutating: false
+    otp_gated: false
+    utterances:
+      - how many brands do I manage
+      - list my brands
+      - who are my clients
+      - show me all brands
+      - which brands do I work with
+    answers_with: [brands_managed]
+
+    authorization:
+      gate: PERMISSION
+      permission: VIEW_CLIENT
+      scope: "Brands whose parent is a client in accessible_client_ids."
+
+    execution:
+      method: GET
+      path: "/api/v1/clients/{apId}/brands"
+      layer: bff
+      state_changing: false
+      note: "Described in the spec as the Brand Management left rail."
+
+    gotchas:
+      - >
+        An agency is an AD_PARTNER; its brands are BRAND_UNDER_AD_PARTNER. A brand cannot create
+        campaigns itself - the agency books on its behalf.
+
+    status: pending_verification
+
+  - id: brand.explain_performance
+    label: How a brand is doing
+    description: A brand's campaigns, impressions, reach and booked revenue.
+    genie_mode: answer
+    mutating: false
+    utterances:
+      - how is Coca-Cola doing
+      - show me brand performance
+      - which brand is performing best
+      - what has this brand spent
+      - how much revenue from this brand
+    answers_with: [brand_live_campaigns, brand_daily_impressions, brand_booked_revenue,
+                   brand_audience_reach_per_day]
+
+    follow_ups:
+
+      - id: which_brand_perf
+        kind: entity_choice
+        when: "No brand named and none in context, or several match the name."
+        question: "Which brand?"
+        options_from: "brands under this agency"
+        default_after_asks: null
+        max_asks: 1
+        resolved_by_context: [brand_management, campaign_detail]
+        status: pending_verification
+
+      - id: brand_perf_window
+        kind: scope
+        when: "No period stated and the screen carries none."
+        question: "Over what period?"
+        options:
+          - value: last_7_days
+            label: Last 7 days
+            hint: the Brand Summary default
+          - value: this_month
+            label: This month
+            hint: the current calendar month
+          - value: all_time
+            label: All time
+            hint: everything since the brand was added
+        resolved_by_context: [brand_management]
+        default_after_asks: last_7_days
+        max_asks: 1
+        status: verified
+
+    authorization:
+      gate: PERMISSION
+      permission: VIEW_CLIENT
+
+    gotchas:
+      - >
+        totalEstimatedRevenue is ESTIMATED, as its name says - booked value, not money already consumed. Never present it as spend.
+      - >
+        totalAudienceReach here is a per-day footfall rollup, not window-unique persons. R12 - name it.
+      - >
+        "Total Booked Revenue" is the agency-to-brand leg - what the agency invoices - and carries
+        no GST. The AdGrid-to-agency leg is internal and must not be surfaced.
+
+    status: pending_verification
+
+    execution:
+      state_changing: false
+      method: GET
+      path: "/api/v1/clients/{brandId}/analytics"
+      layer: bff
+      note: >
+        BrandAnalyticsResponse - screensUsed, activeCampaigns, totalEstimatedRevenue, totalDailyImpressions, totalAudienceReach, screenDistribution.
+
+  - id: brand.explain_contacts
+    label: Who owns a brand
+    description: The brand's contact, its manager, and the campaign manager assigned to it.
+    genie_mode: answer
+    mutating: false
+    utterances:
+      - who is the contact for this brand
+      - who manages Coca-Cola
+      - which campaign manager owns this
+      - who do I speak to about this brand
+
+    authorization:
+      gate: PERMISSION
+      permission: VIEW_CLIENT
+
+    execution:
+      method: GET
+      path: "/api/v1/clients/{clientId}"
+      layer: bff
+      state_changing: false
+
+    gotchas:
+      - >
+        Two different people exist here and are easy to confuse - the BRAND's own contact, on the
+        client side, and the agency's assigned CAMPAIGN MANAGER, whose sub-wallet pays for that
+        brand's campaigns.
+
+    status: pending_verification
+
+  - id: brand.create
+    label: Add a brand
+    genie_mode: handoff
+    mutating: true
+    otp_gated: true
+    target_screen: brand_management
+    utterances:
+      - add a new brand
+      - onboard a client
+      - create a brand
+      - set up a new advertiser
+    refusal: >
+      Adding a brand needs an OTP, so it has to be you. I'll open Brand Management with the Add
+      Brand panel.
+
+    authorization:
+      gate: PERMISSION
+      permission: MANAGE_BRANDS_UNDER_AGENCY
+      roles: [AD_PARTNER_ADMIN]
+      verified_against: "ClientServiceImpl uses OtpGrpcClient - one of the nine OTP-gated domains"
+
+    execution:
+      method: NONE
+      path: "/api/v1/brands"
+      layer: frontend
+      state_changing: true
+      note: "OTP-gated. Genie deep-links only."
+
+    status: verified
+    verified_against: "OtpGrpcClient usage in ClientServiceImpl"

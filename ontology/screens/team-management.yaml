@@ -1,0 +1,138 @@
+screen:
+  id: team_management
+  kind: screen
+  title: User Management
+  route: /team
+  nav_label: Team Management
+  audience: [AD_PARTNER_ADMIN]
+  source_frame: "Agency Admin Dashboard (1.5).docx - Team Management (image9)"
+  purpose: >
+    The people who operate this agency's campaigns - campaign managers and external marketing-agency
+    partners - what each may do, and how much credit sits in their sub-wallet.
+  entities: [user, wallet, brand, campaign]
+  related_screens: [command_centre, wallet_management]
+
+  sections:
+    - id: user_list
+      label: User list
+      subtitle: "Per user: name, role, brands covered, sub-wallet balance, status."
+    - id: user_detail
+      label: User detail
+      subtitle: >
+        Campaign-manager profile - sub-wallet, monthly revenue performance, brands managed and
+        campaign list.
+
+  metrics:
+    - id: user_subwallet_balance
+      source:
+        api: "GET /api/v1/clients/{clientId}/members/{userId}/wallet/summary"
+        method: GET
+        scope_key: client_id
+        field: "currentBalance"
+      label: Sub-wallet balance
+      definition: Credit remaining in this user's sub-wallet.
+      unit: currency_inr
+      freshness: live
+      gotchas:
+        - >
+          Ledger account SUB_WALLET:USER:{userId}. This is what their campaigns are paid from - the
+          payer is the campaign's CREATOR, never the approver.
+      status: pending_verification
+
+    - id: user_monthly_revenue
+      source:
+        api: "GET /api/v1/revenue-breakdown/{apId}/managers/{managerId}"
+        method: GET
+        scope_key: client_id
+        field: "months[] - month, label, revenue"
+      definition: "Revenue booked by this user's campaigns, by month."
+      unit: currency_inr
+      freshness: live
+      label: Monthly revenue performance
+      gotchas:
+        - >
+          creditsBurned on the same response is what the manager consumed, which is the more honest counterpart to revenue booked. revenueTrendPct and trendDirection are computed for you.
+        - >
+          POLICY 2026-09-24 - definition taken from the deck's annotation card, with the backend's vocabulary where they differ. See RESOLUTION-POLICY.md.
+        - >
+          Served by /api/v1/revenue-breakdown/{apId}/managers/{managerId}.
+      status: pending_verification
+
+  actions:
+
+    - capability: user.create
+      label: Add New User
+      mutating: true
+      otp_gated: true
+      gate: PERMISSION
+      permission: MANAGE_ASSIGNEES
+      roles: [AD_PARTNER_ADMIN]
+      genie_mode: navigate
+      status: verified
+      verified_against: "MemberServiceImpl uses OtpGrpcClient; deck shows a Create Campaign Manager OTP modal"
+
+    - capability: user.edit
+      label: Edit User Details
+      mutating: true
+      otp_gated: true
+      gate: PERMISSION
+      permission: MANAGE_ASSIGNEES
+      roles: [AD_PARTNER_ADMIN]
+      genie_mode: navigate
+      status: pending_verification
+
+    - capability: user.deactivate
+      label: Delete / deactivate user
+      mutating: true
+      otp_gated: true
+      gate: PERMISSION
+      permission: MANAGE_ASSIGNEES
+      roles: [AD_PARTNER_ADMIN]
+      genie_mode: navigate
+      status: pending_verification
+
+    - capability: wallet.fund_user
+      label: Add Funds
+      mutating: true
+      otp_gated: true
+      gate: PERMISSION
+      permission: ADJUST_WALLET
+      roles: [AD_PARTNER_ADMIN]
+      genie_mode: navigate
+      status: verified
+      verified_against: "Deck shows a Confirm sub-wallet top up OTP modal; WalletOpenServiceImpl is OTP-gated"
+
+  notes:
+    - >
+      R5 - the nav tab reads "Team Management" while this page's heading reads "User Management".
+      Same mismatch as Inventory Management / Screen Management.
+    - >
+      TWO KINDS OF PERSON. The Add New User form opens with Employee ("internal team member of the
+      agency - has an Employee ID & department") versus Marketing Agency ("external marketing-agency
+      partner - has an agency / company name"). These map to real roles - CAMPAIGN_MANAGER and
+      MARKETING_AGENCY_ADMIN - neither of which is in the PlatformRole enum originally read;
+      SUPER_ADMIN also appears in the backend guide.
+    - >
+      R20 RESOLVED AS A FINDING. The form grants access along two dimensions - "Inventory Access"
+      (Premium / Standard) and "Campaign Access" (Broadcasting / Targeted, described as "which
+      campaign types this manager is allowed to create"). NEITHER DIMENSION EXISTS IN THE BACKEND.
+      All permissions are per-operation; tier and mode are constrained by (ClientType, deliveryMode)
+      and by client-level batch allocations, never per user. So these tick-boxes are UI-only or
+      unbuilt. Genie must not record a tier or motion gate until the backend has one.
+    - >
+      This form creates ONLY campaign managers - the role is fixed on the form. BRAND_MANAGER exists
+      in the backend (view-only) but has no creation path in this UI.
+    - >
+      Sub-wallets can be funded at creation - "Allocate Opening Funds ... transferred from the admin
+      wallet into this user's sub-wallet on creation".
+    - >
+      Deactivating a user REQUIRES transferring their live campaigns to another user first.
+      Deactivating a user offers to TRANSFER their live campaigns to someone else, which implies
+      campaign ownership is a real, movable relationship. Worth modelling if Genie is ever asked
+      "whose campaigns are these?".
+    - >
+      Every mutation on this screen is OTP-gated. Genie can explain the team and deep-link, and can
+      complete none of it.
+    - >
+      Backend permissions for reference - CAMPAIGN_MANAGER may view, create, edit, launch (confirm)
+      and pause, but CANNOT cancel (lacks DELETE_CAMPAIGN). BRAND_MANAGER is view-only.

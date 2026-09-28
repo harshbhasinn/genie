@@ -1,0 +1,178 @@
+screen:
+  id: creative_library
+  kind: screen
+  title: Creative Library
+  route: /brands/{brandId}/creatives
+  audience: [AD_PARTNER_ADMIN, CAMPAIGN_MANAGER]
+  source_frame: "Agency Admin Dashboard (1.5).docx - Creative Library (image4)"
+  purpose: >
+    One brand's ad files, their review state, and the rules for making them. Only approved creatives
+    can be attached to a campaign, so this screen gates whether a campaign can be confirmed at all.
+  entities: [creative, brand]
+  related_screens: [brand_management, launch_campaign]
+
+  filters:
+    - id: asset_type
+      label: Asset type
+      default: null
+      options: [Static, Video]
+      unset_means: Both formats
+    - id: review_state
+      label: Review state
+      default: null
+      options: [Approved, Pending Review, Rejected]
+      unset_means: All states, grouped
+
+  sections:
+    - id: guidelines
+      label: Creative Guidelines
+      subtitle: >
+        Collapsible Do's and Don'ts panel. Ready-made knowledge-base content - lift verbatim into
+        kb/ rather than paraphrasing.
+    - id: library_summary
+      label: Library Summary
+      metrics: [creatives_total, creatives_approved, creatives_pending_review, creatives_rejected,
+                creatives_by_format]
+    - id: creatives_list
+      label: Creatives
+      subtitle: "Grouped by state - In Library (Approved), Pending Review, Rejected."
+
+  metrics:
+
+    - id: creatives_total
+      source:
+        api: "GET /api/v1/clients/{clientId}/library/creatives"
+        method: GET
+        scope_key: client_id
+        field: "totalElements"
+      label: Total Creatives
+      unit: count
+      freshness: live
+      status: pending_verification
+
+    - id: creatives_approved
+      source:
+        api: "GET /api/v1/clients/{clientId}/library/creatives"
+        method: GET
+        scope_key: client_id
+        field: "creatives[].reviewStatus, counted where it is APPROVED"
+      label: Approved - In library
+      definition: Creatives cleared for use on a campaign.
+      unit: count
+      freshness: live
+      gotchas:
+        - >
+          A campaign goes LIVE only when every creative on it is approved, so this count is a launch blocker and not a vanity figure.
+        - >
+          aiReasonCode and aiMessage on a rejected row say why the checker refused it - read them back rather than saying 'rejected'.
+        - >
+          "Usable" in the backend means upload_status == UPLOADED AND review_status == APPROVED.
+          Every gate calls that one check - attach, sub-status, slot allocation, manifest, targeted
+          publish and the fallback resolver.
+      status: pending_verification
+
+    - id: creatives_pending_review
+      source:
+        api: "GET /api/v1/clients/{clientId}/library/creatives"
+        method: GET
+        scope_key: client_id
+        field: "creatives[].reviewStatus, counted where it is PENDING"
+      label: Pending Review
+      definition: Creatives a person still has to decide on.
+      unit: count
+      freshness: live
+      gotchas:
+        - >
+          A campaign goes LIVE only when every creative on it is approved, so this count is a launch blocker and not a vanity figure.
+        - >
+          aiReasonCode and aiMessage on a rejected row say why the checker refused it - read them back rather than saying 'rejected'.
+        - >
+          The AI never rejects an ad. It either approves it or sends it to a person, and if it says
+          nothing within 5 minutes a person decides. So PENDING_REVIEW is a human queue, not a
+          failure state.
+      status: pending_verification
+
+    - id: creatives_rejected
+      source:
+        api: "GET /api/v1/clients/{clientId}/library/creatives"
+        method: GET
+        scope_key: client_id
+        field: "creatives[].reviewStatus, counted where it is REJECTED"
+      label: Rejected
+      unit: count
+      freshness: live
+      gotchas:
+        - >
+          A campaign goes LIVE only when every creative on it is approved, so this count is a launch blocker and not a vanity figure.
+        - >
+          aiReasonCode and aiMessage on a rejected row say why the checker refused it - read them back rather than saying 'rejected'.
+      status: pending_verification
+
+    - id: creatives_by_format
+      source:
+        api: "GET /api/v1/clients/{clientId}/library/creatives"
+        method: GET
+        scope_key: client_id
+        field: "creatives[].creativeType"
+      label: Static / Video
+      definition: Split of the library between still images and video.
+      unit: count
+      freshness: live
+      gotchas:
+        - >
+          Image and video price differently and occupy different slot ladders, so the split is a commercial fact and not a file-type curiosity.
+      status: pending_verification
+
+  actions:
+
+    - capability: creative.upload
+      label: Upload Creative
+      mutating: true
+      otp_gated: false
+      gate: PERMISSION
+      permission: UPLOAD_CREATIVE
+      genie_mode: navigate
+      status: verified
+      verified_against: "CAMPAIGN_CREATION_GUIDE.md 6.8 - upload, AI check, attach"
+
+    - capability: creative.delete
+      label: Delete creative
+      mutating: true
+      otp_gated: false
+      gate: UNKNOWN
+      permission: DELETE_CREATIVE
+      genie_mode: navigate
+      status: pending_verification
+
+  notes:
+    - >
+      Definitions above are verified against CAMPAIGN_CREATION_GUIDE.md 12.1/12.3 (key rule 9,
+      CreativeReviewStatus), but the endpoint serving this screen is not yet identified - hence
+      pending_verification rather than verified.
+    - >
+      DELETE_CREATIVE is one of eight permissions declared but never used in an @RequireAccess. The
+      real gate must be read from the controller in the F1 audit before Genie records it.
+    - >
+      PER-BRAND, NOT GLOBAL. Reached from a brand detail alongside "Manage campaigns" and "Create
+      Campaign". Creatives belong to the ADVERTISED BRAND - a creative attaches only if
+      creative.client_id == campaign.advertisedBrandId.
+    - >
+      REVIEW STATES. Backend creative.review_status is AWAITING_AI_VERDICT, APPROVED,
+      PENDING_REVIEW, REJECTED. The screen shows three of these and omits AWAITING_AI_VERDICT.
+      A separate uploaded_file.verification_status carries NOT_REQUIRED, PENDING, APPROVED,
+      PENDING_REVIEW, TIMED_OUT.
+    - >
+      R24 RESOLVED. The banner here - "Only approved creatives are available to attach when you
+      launch a campaign" - is CORRECT. The Launch step 4 tip claiming you can activate with pending
+      creatives is the defect (D2); the Activate button is correctly disabled.
+    - >
+      D4 RULED 2026-09-22 - 1920 x 1080 (LANDSCAPE) is correct. The Launch wizard is right and
+      THIS screen's Upload Creative modal is the defect: it says 1080 x 1920 px (min) for both
+      formats and needs correcting. Genie should quote 1920 x 1080.
+    - >
+      A KILL SWITCH EXISTS. campaign-service app.creative-review.enabled defaults true; when off,
+      new ads are born APPROVED. And cloud-storage's verification consumer defaults to FALSE in the
+      yml. If review appears not to be running, check those before assuming a bug.
+    - >
+      Every requested slot needs one approved ad, per zone, before confirm - so an unapproved
+      library is what stops a campaign reaching CREATIVES_COMPLETE.

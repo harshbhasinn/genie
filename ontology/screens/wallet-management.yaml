@@ -1,0 +1,236 @@
+screen:
+  id: wallet_management
+  kind: screen
+  title: Wallet Management
+  route: /wallet
+  nav_label: Wallet Management
+  audience: [AD_PARTNER_ADMIN]
+  source_frame: "Agency Admin Dashboard (1.5).docx - Wallet Management (image8)"
+  purpose: >
+    Billing, credits, sub-wallet allocations and payment history. The agency holds one wallet and
+    each campaign manager holds a sub-wallet beneath it; campaigns are paid from whichever applies.
+  entities: [wallet, client, user, brand]
+  related_screens: [command_centre, team_management]
+
+  filters:
+    - id: period
+      label: Transaction History period
+      default: this_month
+      unset_means: "Never unset."
+    - id: spending_analysis_grouping
+      label: Spending Analysis grouping
+      default: by_brand
+      options: [By Brand]
+
+  sections:
+    - id: kpis
+      label: Wallet KPIs
+      metrics: [main_wallet_balance, sub_wallet_total, month_consumption, total_credits_owned]
+    - id: spending_analysis
+      label: Spending Analysis
+      subtitle: "Spend by brand, as a ranked bar list."
+    - id: low_balance_alert
+      label: Low Balance Alert
+      subtitle: "Advisor surface. Projects the funding needed for the next 30 days."
+    - id: relationship_manager
+      label: Your Relationship Manager
+      subtitle: "Named AdGrid contact, with a Request Funds action."
+    - id: transaction_history
+      label: Transaction History
+      subtitle: "All / Credits / Allocations. Each row: description, type, amount, running balance."
+    - id: manager_wallets
+      label: Campaign Manager Wallets
+      subtitle: "Per manager: brands covered, allocated, spent, balance, and an Allocate action."
+      metrics: [manager_allocated, manager_spent, manager_balance]
+
+  metrics:
+
+    - id: main_wallet_balance
+      label: Main Wallet Balance
+      definition: Prepaid credit held by the agency and available to allocate or spend.
+      formula: "top-ups minus consumption minus allocations out"
+      unit: currency_inr
+      freshness: live
+      source:
+        api: "GET /api/v1/clients/{clientId}/wallet/balance"
+        method: GET
+        scope_key: client_id
+        field: "balance (also apRemaining on /wallet/kpis)"
+      gotchas:
+        - >
+          POLICY 2026-09-24 - resolved in favour of the API/backend over the design. See RESOLUTION-POLICY.md.
+          The Command Centre's 'Wallet Balance' card means THIS - the main agency wallet.
+        - >
+          The ledger is WALLET:CLIENT:{apId}, a double-entry account in billing. Sub-wallets are
+          separate accounts, SUB_WALLET:USER:{userId} - this figure does not include them.
+        - >
+          R4 - the Command Centre shows a single card called "Wallet Balance" and does not say which
+          of the three figures on this screen it is. Recommendation is this one.
+      status: pending_verification
+
+    - id: sub_wallet_total
+      source:
+        api: "GET /api/v1/clients/{clientId}/members/wallet-overview"
+        method: GET
+        scope_key: client_id
+        field: "totalSubWalletBalance"
+      label: In Team Sub-Wallets
+      definition: Credit already allocated out to campaign managers' sub-wallets.
+      unit: currency_inr
+      freshness: live
+      gotchas:
+        - >
+          Committed, not spendable by the agency. Counting it as available is what makes the runway
+          alert under-fire.
+      status: pending_verification
+
+    - id: month_consumption
+      source:
+        api: "GET /api/v1/clients/{clientId}/wallet/kpis"
+        method: GET
+        scope_key: client_id
+        field: "consumedThisMonth"
+      label: This Month's Consumption
+      definition: Agency spend in the current month.
+      unit: currency_inr
+      freshness: live
+      gotchas:
+        - "A spend figure, not a balance. Do not offer it when asked 'how much do I have?'"
+      status: pending_verification
+
+    - id: total_credits_owned
+      source:
+        api: "GET /api/v1/clients/{clientId}/wallet/kpis"
+        method: GET
+        scope_key: client_id
+        field: "apRemaining + totalSubWalletBalance (computed)"
+      label: Total Credits owned
+      definition: Main wallet plus all sub-wallet balances.
+      formula: "main_wallet_balance + sub_wallet_total"
+      unit: currency_inr
+      freshness: live
+      gotchas:
+        - >
+          A UI aggregate, not a ledger. Money is never spent from "total credits" as such - it is
+          spent from either the agency wallet or one manager's sub-wallet.
+      status: pending_verification
+
+    - id: wallet_runway_projection
+      source:
+        api: "GET /api/v1/clients/{clientId}/wallet/kpis"
+        method: GET
+        scope_key: client_id
+        field: "runwayMonths, lowBalance, lowBalanceThreshold"
+      label: Low Balance Alert
+      definition: Funding projected to be needed over the next 30 days at the recent spending rate.
+      formula: "recent daily burn x 30, compared against available balance"
+      unit: currency_inr
+      freshness: live
+      gotchas:
+        - >
+          THE BACKEND ALREADY COMPUTES THIS. /wallet/kpis returns runwayMonths, lowBalance and
+          lowBalanceThreshold, so the advisor reads three fields rather than picking a balance and
+          dividing by a burn rate. R4 is no longer a blocker here.
+        - >
+          UNIT MISMATCH TO CHECK - the API returns runwayMonths; the Figma card says "Runway ~6
+          days". Confirm which before Genie quotes either.
+      status: pending_verification
+
+    - id: manager_allocated
+      source:
+        api: "GET /api/v1/clients/{clientId}/members/{userId}/wallet/summary"
+        method: GET
+        scope_key: client_id
+        field: "totalAllocated"
+      label: Allocated
+      definition: Credit moved from the agency wallet into this manager's sub-wallet.
+      unit: currency_inr
+      freshness: live
+      status: pending_verification
+
+    - id: manager_spent
+      source:
+        api: "GET /api/v1/clients/{clientId}/members/{userId}/wallet/summary"
+        method: GET
+        scope_key: client_id
+        field: "totalSpent"
+      label: Spent
+      definition: Credit this manager has consumed on campaigns.
+      unit: currency_inr
+      freshness: live
+      gotchas:
+        - >
+          totalRefunded on the same response explains a balance that does not equal allocated minus spent - cancelled campaigns return money.
+      status: pending_verification
+
+    - id: manager_balance
+      source:
+        api: "GET /api/v1/clients/{clientId}/members/{userId}/wallet/summary"
+        method: GET
+        scope_key: client_id
+        field: "currentBalance"
+      label: Balance
+      definition: Credit remaining in this manager's sub-wallet.
+      formula: "allocated minus spent"
+      unit: currency_inr
+      freshness: live
+      gotchas:
+        - >
+          The approvals screen checks this before an admin authorises - "Sub-wallet sufficient -
+          balance vs budget". That is the subwallet_short advisor, specified by the design.
+      status: pending_verification
+
+  actions:
+
+    - capability: wallet.request_funds
+      label: Request Funds
+      mutating: true
+      otp_gated: true
+      gate: PERMISSION
+      permission: TOPUP_WALLET
+      roles: [AD_PARTNER_ADMIN]
+      genie_mode: navigate
+      status: verified
+      verified_against: "WalletOpenServiceImpl uses OtpGrpcClient - one of the nine OTP-gated domains"
+
+    - capability: wallet.allocate_to_subwallet
+      label: Allocate
+      mutating: true
+      otp_gated: true
+      gate: PERMISSION
+      permission: ADJUST_WALLET
+      roles: [AD_PARTNER_ADMIN]
+      genie_mode: navigate
+      status: verified
+      verified_against: "WalletOpenServiceImpl uses OtpGrpcClient; deck shows a Confirm sub-wallet top up OTP modal"
+
+    - capability: wallet.export_report
+      label: Export Report
+      mutating: false
+      gate: PERMISSION
+      permission: VIEW_WALLET
+      genie_mode: navigate
+      status: pending_transcription
+
+  notes:
+    - >
+      TWO-TIER WALLET. Agency wallet WALLET:CLIENT:{apId}, member sub-wallet SUB_WALLET:USER:{userId}.
+      The PAYER is the campaign's CREATOR, from their sub-wallet, if their role has one
+      (CAMPAIGN_MANAGER, MARKETING_AGENCY_ADMIN). Otherwise the agency wallet pays. It is never the
+      approver or whoever clicked confirm.
+    - >
+      WHEN MONEY MOVES. Coverage check at initiate-confirm (balance >= adgridCost x 1.18, nothing
+      moves), debit at OTP verify (base + 18% GST), revenue recognised at campaign completion.
+      Targeted campaigns are postpaid - nothing at confirm. Network partner campaigns cost zero.
+    - >
+      "Request funds from AdGrid" is a REQUEST, not a self-service top-up. The modal reads "Top up
+      your agency wallet. This is the balance your campaigns run on - platform charges are deducted
+      from it as they're used."
+    - >
+      Both wallet mutations are OTP-gated, so Genie can never complete either. It can explain the
+      position, compute the runway once R4 lands, and deep-link to the screen.
+    - >
+      Sub-wallets can also be funded at user creation - the Add New User form carries an "Allocate
+      Opening Funds" field described as "transferred from the admin wallet into this user's
+      sub-wallet on creation".
+    - "Cancelling a campaign moves no money. Refunds are a separate action, and admin refunds are on hold."
