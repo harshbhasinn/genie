@@ -1,0 +1,570 @@
+screen:
+  id: launch_campaign
+  kind: wizard
+  title: Create Campaign
+  route: /brands/{brandId}/campaigns/new
+  nav_label: Create Campaign
+  audience: [AD_PARTNER_ADMIN, CAMPAIGN_MANAGER]
+  source_frame: "Agency Admin Dashboard (1.5).docx - Launch Campaign (image5), Campaign Manager variant (image13)"
+  variants: [broadcasting, targeted]
+  purpose: >
+    The four-step wizard that books a campaign. Reached from a brand, not from the top nav.
+    This is the screen AdGuide prefills - every value on the Recommended plan card maps to a
+    field here, and the user edits before submitting.
+  entities: [brand, campaign, creative, device, wallet]
+
+  related_screens: [brand_management, creative_library, inventory_management, command_centre]
+
+  # ───────────────────────────────────────────────────────────────────────
+  # STEP 2 DIFFERS BY DELIVERY MODE. Steps 1, 3 and 4 are shared.
+  #   broadcasting -> Select Screens   (reserve slots on specific devices)
+  #   targeted     -> Audience Targeting (no screens; auction per impression)
+  # ───────────────────────────────────────────────────────────────────────
+
+  steps:
+
+    - id: campaign_details
+      index: 1
+      title: Campaign Details
+      applies_to: both
+      purpose: Name, flight dates, dayparts, inventory tier, creative format and objective.
+      fields:
+
+        - id: delivery_mode
+          label: Campaign type
+          type: enum
+          required: true
+          applies_to: both
+          options: [Broadcasting, Targeted]
+          prefillable: true
+          maps_to: campaign.deliveryMode (BROADCAST | TARGETED)
+          gotchas:
+            - >
+              Decides which step 2 the user sees, and which pricing model applies. An AD_PARTNER
+              may run both; a NETWORK_PARTNER may run BROADCAST only.
+            - "TARGETED is forced to NON_PREMIUM inventory."
+          status: verified
+          verified_against: "CAMPAIGN_CREATION_GUIDE.md 2.4 - CampaignClientFlowFactory keyed on (ClientType, deliveryMode)"
+
+        - id: campaign_name
+          label: Campaign Name
+          type: text
+          required: true
+          applies_to: both
+          prefillable: true
+          maps_to: campaign.name
+          deck_value: "IPL Season 2026"
+          status: pending_verification
+
+        - id: campaign_schedule
+          label: Campaign Schedule
+          type: date_range
+          required: true
+          applies_to: both
+          prefillable: true
+          maps_to: campaign.startDate / campaign.endDate
+          gotchas:
+            - >
+              A daypart stays bookable until it ends, so a campaign can still start today if the
+              daypart has not closed.
+            - "Start-date availability is checked separately before booking."
+          status: verified
+          verified_against: "CAMPAIGN_CREATION_GUIDE.md key rule 3, 6.1 start-date check"
+
+        - id: campaign_days
+          label: Campaign Days
+          type: computed
+          applies_to: both
+          derived_from: end date minus start date, inclusive
+          unit: days
+          prefillable: false
+          status: pending_verification
+
+        - id: time_slots
+          label: Time Slots
+          type: multi_enum
+          required: true
+          applies_to: both
+          options: [Morning, Afternoon, Evening, Night]
+          prefillable: true
+          maps_to: campaign.timeSlots (TimeSlots enum)
+          constraints: "Four 3-hour bands over a 10:00-22:00 sellable day."
+          gotchas:
+            - >
+              RULED (R2, D1): Morning 10-13, Afternoon 13-16, Evening 16-19, Night 19-22. The
+              Command Centre's Daypart Occupancy chart uses different hours and is being corrected
+              to match.
+            - >
+              Daypart is a pricing multiplier on TARGETED campaigns - the CPM build-up shows
+              Day-part x1.19 for 3 slots.
+          status: verified
+          verified_against: "CAMPAIGN_CREATION_GUIDE.md key rule 3; util/enums/shop/TimeSlots"
+
+        - id: inventory_type
+          label: Inventory Type
+          type: enum
+          required: true
+          applies_to: both
+          options: [Premium, Standard]
+          prefillable: true
+          maps_to: campaign.deviceTier (PREMIUM | NON_PREMIUM)
+          gotchas:
+            - >
+              PREMIUM = screens a network partner installed in its own shops, 120s loop, has a
+              promo strip (PROGRAM_120). STANDARD/NON_PREMIUM = screens already in Lesspay merchant
+              shops, 60s loop, no strip (PROGRAM_60).
+            - "TARGETED forces NON_PREMIUM. The enum value ANY exists but is rejected."
+            - >
+              The deck labels these 'Branded Retail Chain Stores' and 'Less Pay Acquired Merchants'.
+              Premium is annotated NOT PRIORITY in the Brand Management frame.
+          status: verified
+          verified_against: "CAMPAIGN_CREATION_GUIDE.md 2.4, 4 (Program seeds)"
+
+        - id: creative_type
+          label: Creative Type
+          type: enum
+          required: true
+          applies_to: both
+          options: [Static Ad, Video Ad]
+          prefillable: true
+          maps_to: creative format on the campaign
+          constraints: "Static 10s, JPG/PNG, max 5MB. Video 15s, MP4, max 10MB."
+          gotchas:
+            - >
+              RULED 2026-09-22 - 1920x1080 (LANDSCAPE) is correct, and this screen is right. The
+              Creative Library upload modal says 1080x1920 and is the one to fix.
+          status: pending_verification
+
+        - id: frequency_slots
+          label: Frequency (slots per minute loop)
+          type: slider
+          applies_to: broadcasting
+          prefillable: true
+          maps_to: imageSlotsRequested / videoSlotsRequested
+          constraints: "Deck shows max 18 static, max 12 video."
+          gotchas:
+            - >
+              The on-screen note 'a 60-second loop holds 6 static (10s) or 4 videos (15s)' is the
+              NON-PREMIUM case only. Premium runs a 120s loop. Both were true and neither said so
+              (R3).
+            - "Plays per daypart = daypart seconds / loop seconds. A 3h daypart on a 60s loop = 180."
+          status: verified
+          verified_against: "CAMPAIGN_CREATION_GUIDE.md 4 - Program, buildCostCells"
+
+        - id: campaign_objective
+          label: Campaign Objective
+          type: enum
+          required: true
+          applies_to: both
+          options:
+            - Brand Awareness
+            - Product Launch
+            - Seasonal Promotion
+            - Tactical Campaign
+            - Regional Campaign
+            - Test & Learn
+          prefillable: true
+          maps_to: "(none) - UI-only field, not persisted. See R26."
+          gotchas:
+            - >
+              R26: 'objective' is NOT a backend field. It is a UI-only concept, so the option list
+              is design's to define. The Approvals screen shows an objective of 'Footfall' which is
+              not in this list.
+          status: verified
+          verified_against: "CAMPAIGN_CREATION_GUIDE.md - no objective field exists"
+
+      notes:
+        - >
+          Right rail shows Campaign Preview (tier badge, start/end/duration), a loop visualisation,
+          and a Readiness checklist. Left rail shows brand info and recent campaigns.
+        - "A 'Check Availability' action sits beside the Broadcasting/Targeted toggle."
+
+    - id: select_screens
+      index: 2
+      title: Select Screens
+      applies_to: broadcasting
+      purpose: >
+        Choose how many screens to book, per city and store category. Cost recalculates live as
+        the sliders move.
+      fields:
+
+        - id: cities
+          label: Select Cities
+          type: multi_enum
+          required: true
+          applies_to: broadcasting
+          options: [Delhi, Gurugram, Noida, Faridabad, Ghaziabad]
+          prefillable: true
+          maps_to: cost cell city dimension (CityCode)
+          gotchas:
+            - >
+              R11: GGN is the code; 'Gurugram' is the display name used here and on Brand
+              Management, while the Command Centre and Inventory say 'Gurgaon'.
+            - >
+              RULED 2026-09-22 - the missing NCR cities get their own codes, to be added to
+              CityCode: Faridabad = FBD, Ghaziabad = GBD, Greater Noida = GND. Genie may map to
+              these now; they are not yet in the shipped enum.
+          status: pending_verification
+
+        - id: screens_by_category
+          label: Screens per store category
+          type: slider
+          required: true
+          applies_to: broadcasting
+          options: [Grocery/Kirana, Pharmacy, Electronics, Dairy/Bakery, Clothing, Others]
+          prefillable: true
+          maps_to: BillingCostCell.device_count, per (city, shop_type)
+          constraints: "Bounded by the AVAILABLE count for that city and category."
+          gotchas:
+            - >
+              THIS IS THE ALLOCATOR'S OUTPUT SHAPE. Selection grain is (city x store category x
+              count), matching BillingCostCell exactly - so AdGuide's prefill is a direct field
+              mapping, not a translation.
+            - >
+              Canonical ShopTypes {GROCERY, PHARMACY, DAIRY, ELECTRONIC, CLOTHING, OTHERS}. The
+              deck's 'Clothings' and 'Electronics' are display variants.
+            - "Quick-select chips per city: All / 50% / None."
+          status: verified
+          verified_against: "CAMPAIGN_CREATION_GUIDE.md 4 - util/enums/shop/ShopTypes; BillingCostCell"
+
+      notes:
+        - >
+          Right rail 'Cost Summary' recalculates on every change - Total Campaign Cost, Base/Image/
+          Video/Daily Cost, Avg CPM, Impressions, Daily Reach, plus By City and By Category. This is
+          simulate-cost being called interactively, which suggests it is cheap enough for the
+          allocator to call repeatedly.
+        - >
+          A draft holds nothing. Screens are reserved only at confirm, for 10 minutes, so a plan can
+          sit here without consuming inventory.
+
+    - id: audience_targeting
+      index: 2
+      title: Audience Targeting
+      applies_to: targeted
+      purpose: >
+        No screens are reserved. The ad is published to audience topics and serves into an empty
+        slot whenever a matching person is detected. Billed per won impression.
+      fields:
+
+        - id: target_gender
+          label: Gender
+          type: multi_enum
+          applies_to: targeted
+          options: [Male, Female]
+          prefillable: true
+          maps_to: targeting.genders
+          status: verified
+          verified_against: "CAMPAIGN_CREATION_GUIDE.md 13 - targeting {ageGroups, genders, ...}"
+
+        - id: target_age_groups
+          label: Age group
+          type: multi_enum
+          applies_to: targeted
+          options: ["18-24", "25-34", "35-44", "45-54", "55+"]
+          prefillable: true
+          maps_to: targeting.ageGroups
+          constraints: "Select one or more, or leave empty for all."
+          gotchas:
+            - >
+              R15: these five TARGETING bands differ from the four REPORTING buckets the analytics
+              API returns (18-25, 26-35, 36-50, 50+). They may legitimately differ - targeting is a
+              selection input, reporting comes from the rollup - but a user who targets 25-34 and
+              reads a report bucketed 26-35 will be confused. Unresolved.
+          status: blocked
+          blocked_by: [R15]
+          blocked_note: "Targeting bands vs reporting bands - see R15 refinement, round 9."
+
+        - id: store_category_context
+          label: Store category context
+          type: multi_enum
+          applies_to: targeted
+          options: [Grocery, Pharmacy, Electronics, Dairy, Clothing, Others]
+          prefillable: true
+          maps_to: targets[].shopType
+          constraints: "High-intent categories (Pharmacy, Electronics) apply a x1.30 CPM multiplier."
+          status: verified
+          verified_against: "CAMPAIGN_CREATION_GUIDE.md 13 - targets[] {city?, shopType?}"
+
+        - id: max_cpm_bid
+          label: Max CPM bid
+          type: currency_inr
+          required: true
+          applies_to: targeted
+          prefillable: true
+          maps_to: targeting.imageCpm / targeting.videoCpm
+          constraints: "Must be at or above the floor CPM."
+          gotchas:
+            - >
+              Second-price auction - you clear at the runner-up's price, not your bid. The deck
+              shows 'Suggested to win competitively' above the clearing price.
+            - "Charged per won, camera-verified matched impression at the clearing CPM."
+          status: verified
+          verified_against: "CAMPAIGN_CREATION_GUIDE.md 6.4 rate floors, 13"
+
+        - id: total_budget
+          label: Total budget
+          type: currency_inr
+          required: true
+          applies_to: targeted
+          prefillable: true
+          maps_to: targeting.totalBudget
+          constraints: "Must be > 0 at confirm."
+          status: verified
+          verified_against: "CAMPAIGN_CREATION_GUIDE.md 13 - commercials checked (budget > 0)"
+
+        - id: daily_spend_limit
+          label: Daily spend limit
+          type: currency_inr
+          applies_to: targeted
+          prefillable: true
+          maps_to: targeting.dailySpendLimit
+          constraints: "Optional. Blank = auto-pace, capped by available matched supply."
+          status: verified
+          verified_against: "CAMPAIGN_CREATION_GUIDE.md 13"
+
+        - id: pacing
+          label: Pacing
+          type: enum
+          required: true
+          applies_to: targeted
+          options: [Even, Accelerated]
+          default: Even
+          prefillable: true
+          maps_to: targeting.pacing
+          gotchas:
+            - >
+              Even = equal spend across days and through the day. Accelerated = spends as matches
+              appear, front-loading delivery.
+            - >
+              IMPORTANT FOR ADVISORS: 'behind schedule' is a defect under Even and the EXPECTED
+              behaviour under Accelerated. The budget_pacing advisor must read this field before
+              deciding anything is wrong.
+            - "Pacing enforcement is DESIGN ONLY in the backend - not yet built."
+          status: verified
+          verified_against: "CAMPAIGN_CREATION_GUIDE.md 13 - pacing enforcement [DESIGN ONLY]"
+
+      notes:
+        - >
+          Right rail 'Auction & Delivery' shows the full CPM build-up - Base x Audience x Context x
+          Format x Day-part = Floor CPM.
+        - >
+          Targeted stores targets[] in campaign_metadata with no device count, and targeting in
+          campaign.delivery_config_json. At confirm there are no bookings, no hold and no price.
+
+    - id: creative_format
+      index: 3
+      title: Creative Format
+      applies_to: both
+      purpose: Attach approved creatives to the campaign's zones and slots.
+      fields:
+        - id: attached_creatives
+          label: Attached creatives
+          type: entity_ref
+          required: true
+          applies_to: both
+          prefillable: false
+          maps_to: campaign_creative_assignment
+          gotchas:
+            - >
+              Only USABLE ads can be attached - upload_status UPLOADED and review_status APPROVED.
+              Attach refuses anything else.
+            - >
+              Every requested slot needs one approved ad, per zone, before confirm. The campaign
+              cannot reach CREATIVES_COMPLETE otherwise.
+            - "Creatives belong to the advertised brand, not the operating client."
+          status: verified
+          verified_against: "CAMPAIGN_CREATION_GUIDE.md key rule 8, 12.4, 2.2"
+      notes:
+        - "Step not yet transcribed in detail from the deck - fields above are from the backend guide."
+
+    - id: campaign_summary
+      index: 4
+      title: Campaign Summary
+      applies_to: both
+      purpose: Review everything, accept terms, and activate or submit for approval.
+      fields:
+        - id: terms_accepted
+          label: Terms & Conditions
+          type: checkbox
+          required: true
+          applies_to: both
+          prefillable: false
+          constraints: "Must be ticked before the terminal action enables."
+          gotchas:
+            - >
+              Covers Terms & Conditions, Campaign Policies and Cancellation Policies. AdGuide must
+              never tick this - it is an explicit human acceptance.
+          status: pending_verification
+      notes:
+        - >
+          Final Checklist gates the terminal action - Details complete, Screens selected, Creatives
+          uploaded, All approved, Terms accepted. AdGuide can report against this directly
+          ("you are two items short of activating").
+        - >
+          D2: the Tip panel says 'You can activate now even with pending creatives'. The button is
+          correctly disabled; the TIP TEXT is wrong and is being fixed.
+        - >
+          D3: the Settlement Notice says 'no additional payment to AdGrid is required'. That is the
+          NETWORK_PARTNER case. On this AD_PARTNER screen a broadcast campaign DOES debit the
+          wallet. Unresolved.
+
+  metrics:
+
+    - id: plan_total_cost
+      source:
+        api: "POST /api/v1/campaigns/simulate-cost"
+        method: POST
+        scope_key: client_id
+        field: "totalCost"
+      label: Total Campaign Cost
+      definition: What this campaign will cost, as priced by the selection made so far.
+      formula: "sum over cost cells of (device_count x rate x slots x days), with surcharges"
+      unit: currency_inr
+      freshness: live
+      gotchas:
+        - >
+          adPartnerToBrandTotalCost is what the brand pays; adgridToAdPartnerTotalCost is the agency's own cost basis and is never surfaced. totalCost is the figure the plan card means.
+        - >
+          Two legs are priced. The WALLET pays leg 1 (AdGrid to AdPartner) PLUS 18% GST - the
+          coverage check is balance >= adgridCost x 1.18. Leg 2 (AdPartner to Brand) carries no GST
+          and is recorded as a receivable.
+        - >
+          The wizard shows only the brand-facing leg ('Cost to Brand' / 'Base Amount'). The
+          AdGrid-to-AdPartner per-cell breakdown is marked INTERNAL and must never be surfaced.
+        - "Targeted campaigns are postpaid - nothing is charged at confirm."
+      verified_against: "CAMPAIGN_CREATION_GUIDE.md 10.1, 10.4; BillingSimulationServiceImpl"
+      status: verified
+
+    - id: plan_estimated_impressions
+      source:
+        api: "POST /api/v1/campaigns/simulate-cost"
+        method: POST
+        scope_key: client_id
+        field: "totalSlotsPerDay multiplied by totalDays"
+      label: Estimated Impressions
+      definition: Ad-views this selection is projected to deliver over the flight.
+      unit: count
+      freshness: live
+      gotchas:
+        - >
+          This counts SLOTS, which is plays, which is impressions as the platform defines them - R18, playback events and not people. It assumes every booked slot plays; downtime makes the real figure lower, which is what screen_uptime is for.
+        - "Impressions are playback events, not people. Reach is the de-duplicated person count."
+      status: pending_verification
+
+    - id: plan_daily_reach
+      label: Daily Reach
+      definition: People the selection is projected to reach per day.
+      unit: per_day
+      freshness: live
+      gotchas:
+        - >
+          simulate-cost returns cost and slots. Turning slots into unique people is exactly what the S5 reach model does, and it does not exist yet.
+        - >
+          POLICY 2026-09-24 - resolved in favour of the API/backend over the design. See RESOLUTION-POLICY.md.
+          Daily footfall, not persons - the backend field named dailyReach is footfall per day.
+        - >
+          R12: the backend field named dailyReach is FOOTFALL per day, not distinct persons. And
+          estimatedMonthlyReach multiplies it by days with no de-duplication at all. AdGuide must
+          not present either as window-unique reach.
+      status: blocked
+      blocked_by: [R12, R29]
+      blocked_note: >
+        Two separate problems on one number. R12 - the frequency curve from S5 does not exist, so
+        impressions cannot be turned into people. R29 - the Recommended-plan card that would show it
+        is screen-shaped, and a Targeted campaign books no screens at all, so the card is wrong for
+        that motion even once the number arrives.
+
+    - id: plan_avg_cpm
+      source:
+        api: "DERIVED - POST /api/v1/campaigns/simulate-cost totalCost over slots, times 1000"
+        method: NONE
+        scope_key: client_id
+        field: "totalCost, totalSlotsPerDay, totalDays"
+      label: Avg CPM
+      definition: Blended price per 1,000 impressions for this selection.
+      unit: cpm_inr
+      freshness: live
+      gotchas:
+        - >
+          Derived, and worth labelling as such next to a rate-card CPM, which is a quoted price rather than an achieved one.
+      status: pending_verification
+
+    - id: plan_floor_cpm
+      source:
+        api: "POST /api/v1/campaigns/targeted-rate-check"
+        method: POST
+        scope_key: client_id
+        field: "imageFloorCpm, videoFloorCpm"
+      label: Floor CPM
+      definition: The minimum price per 1,000 verified impressions for this targeting.
+      formula: "Base x Audience multiplier x Context multiplier x Format multiplier x Day-part multiplier"
+      unit: cpm_inr
+      freshness: live
+      gotchas:
+        - >
+          configured is false when any selected cell is unpriced - check it before quoting a floor, or the number is an average over an incomplete grid. missingRateCells says which.
+        - >
+          The deck's Auction & Delivery panel gives the whole build-up. Narrower audiences raise the
+          floor; the auction clears above it only when demand competes.
+        - "Targeted only."
+      status: pending_verification
+
+  actions:
+
+    - capability: campaign.save_draft
+      label: Save to Draft
+      mutating: true
+      otp_gated: false
+      gate: PERMISSION
+      permission: CREATE_CAMPAIGN
+      genie_mode: prefill
+      status: verified
+      verified_against: "CAMPAIGN_CREATION_GUIDE.md 6.6 POST /api/v1/campaigns"
+
+    - capability: campaign.activate
+      label: Activate
+      mutating: true
+      otp_gated: true
+      gate: PERMISSION
+      permission: LAUNCH_CAMPAIGN
+      roles: [AD_PARTNER_ADMIN, NETWORK_PARTNER_ADMIN]
+      genie_mode: prefill
+      status: verified
+      verified_against: "CAMPAIGN_CREATION_GUIDE.md key rules 16-17, 6.9, 6.10"
+
+    - capability: campaign.submit_for_approval
+      label: Submit for approval
+      mutating: true
+      otp_gated: false
+      gate: ROLE
+      roles: [CAMPAIGN_MANAGER]
+      genie_mode: prefill
+      status: verified
+      verified_against: "CAMPAIGN_CREATION_GUIDE.md key rule 16 - maker-checker on confirm only"
+
+    - capability: campaign.check_availability
+      label: Check Availability
+      mutating: false
+      otp_gated: false
+      gate: PERMISSION
+      permission: VIEW_CAMPAIGN
+      genie_mode: direct
+      status: verified
+      verified_against: "CAMPAIGN_CREATION_GUIDE.md 6.2 availability-search"
+
+  notes:
+    - >
+      TERMINAL ACTION IS ROLE-DEPENDENT (R21). An AD_PARTNER_ADMIN sees 'Activate' - they are the
+      checker, so their own campaign needs no approval. A CAMPAIGN_MANAGER sees 'Submit for
+      approval', and the campaign sits in Pending until an admin authorises it with an OTP.
+      AdGuide's prefill CTA label must be computed from the user's role, not templated.
+    - >
+      Confirm is a two-step reserve-then-verify - initiate-confirm holds devices for 10 minutes and
+      issues an OTP valid for 2 minutes; OTP verify books them and debits the wallet. AdGuide can
+      never complete this step.
+    - >
+      Only ACTIVE clients may create, edit or confirm. A frozen or suspended client can still read,
+      cancel and pause.
+    - >
+      Three flow variants exist in the deck - Standard Broadcasting, Standard Targeted and Premium.
+      Premium is annotated NOT PRIORITY. Prefill must be variant-aware.

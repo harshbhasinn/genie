@@ -1,0 +1,262 @@
+domain: explain
+description: >
+  Answering "what does this mean" from the ontology - definitions, formulas, gotchas and business
+  concepts. No live data, no RAG unless the ontology has no entry. This is the path that must never
+  return the wrong metric's definition, which is why disambiguation matters more here than anywhere.
+
+capabilities:
+
+  - id: explain.metric
+    label: What a number means
+    description: >
+      The definition, formula and gotchas for one metric, looked up exactly - never retrieved by
+      similarity.
+    genie_mode: answer
+    mutating: false
+    otp_gated: false
+    utterances:
+      - what does this number mean
+      - explain this metric
+      - how is that calculated
+      - what is avg dwell
+      - what does verified impressions mean
+      - how do you work out blended yield
+      - what's the formula for gross profit
+      - define this for me
+
+    follow_ups:
+      - id: which_utilization
+        kind: disambiguation
+        when: >
+          The user says "utilisation" or "utilization" without qualifying it, and no metric is
+          selected on screen.
+        question: "Which utilisation?"
+        options:
+          - value: budget_utilization
+            label: Budget utilisation
+            hint: spend against a campaign's allocated budget
+          - value: monthly_spot_inventory_utilised
+            label: Inventory utilisation
+            hint: how full the ad slots are across the network
+        resolved_by_context: [command_centre, campaign_detail, inventory_management]
+        default_after_asks: null
+        max_asks: 1
+        status: pending_verification
+
+      - id: which_attention
+        kind: disambiguation
+        when: "The user says 'attention' without qualifying it."
+        question: "Which one do you mean?"
+        options:
+          - value: avg_attention
+            label: Avg Attention
+            hint: the share of people present who actually looked - a percentage
+          - value: avg_dwell
+            label: Avg Dwell
+            hint: how long someone stayed in view - seconds
+        resolved_by_context: [command_centre, campaign_detail]
+        default_after_asks: null
+        max_asks: 1
+        status: verified
+
+      - id: which_reach
+        kind: disambiguation
+        when: "The user says 'reach' without qualifying it."
+        question: "Reach can mean a few different things here - which?"
+        options:
+          - value: network_reach
+            label: Network reach
+            hint: unique people the whole network can put an ad in front of per day
+          - value: campaign_reach
+            label: Campaign reach
+            hint: people one campaign actually reached
+          - value: monthly_reach
+            label: Monthly reach
+            hint: a gross 30-day figure that counts repeat visitors more than once
+        resolved_by_context: [command_centre, campaign_detail, inventory_management]
+        default_after_asks: null
+        max_asks: 1
+        status: verified
+
+    authorization:
+      gate: NONE
+      scope: >
+        Definitions are not tenant data. But a metric the user's role cannot see should not be
+        explained in a way that implies they can see its value.
+
+    execution:
+      state_changing: false
+      method: NONE
+      layer: genie
+      note: "Exact lookup in the ontology. No network call, no vector search."
+
+    gotchas:
+      - >
+        NEVER answer this from a vector search. "Budget utilization" and "batch utilization" score
+        within noise of each other on any embedding model, and the wrong answer is confidently
+        wrong about a number on the user's screen. Exact lookup or a follow-up question - nothing
+        in between.
+      - >
+        When the screen already names the metric - ui_context.visible_metrics or a selected widget -
+        the answer is a lookup with no question at all. That is the whole point of screen awareness.
+      - >
+        If the metric is blocked, say what the conflict is rather than staying silent. "Two screens
+        define this differently and we haven't settled which is right" is a useful answer.
+
+    status: pending_verification
+
+  - id: explain.difference
+    label: Difference between two things
+    description: Compare two metrics or two concepts that people confuse.
+    genie_mode: answer
+    mutating: false
+    utterances:
+      - what's the difference between reach and impressions
+      - how is dwell different from attention
+      - broadcasting vs targeted
+      - premium or standard - what changes
+      - is footfall the same as impressions
+      - rev-share versus rental
+
+    authorization:
+      gate: NONE
+
+    execution:
+      state_changing: false
+      method: NONE
+      layer: genie
+
+    gotchas:
+      - >
+        This is unusually valuable here because the product genuinely does use several near-identical
+        terms. Impressions are playback events; reach is people; footfall is visits. Saying so
+        plainly prevents the next three wrong questions.
+      - >
+        Where two terms disagree because of an unresolved conflict, say that too. Honest beats
+        confident.
+
+    status: pending_verification
+
+  - id: explain.concept
+    label: How something works
+    description: >
+      Business concepts rather than single metrics - the two selling motions, inventory tiers,
+      commercial models, the approval flow, how money moves.
+    genie_mode: answer
+    mutating: false
+    utterances:
+      - how does targeted pricing work
+      - explain the approval process
+      - when does money leave my wallet
+      - what is a daypart
+      - how does the auction work
+      - what does maker-checker mean
+      - why do I need an OTP
+
+    authorization:
+      gate: NONE
+
+    execution:
+      state_changing: false
+      method: NONE
+      layer: genie
+      note: "Ontology first; the knowledge base once Tier A exists."
+
+    gotchas:
+      - >
+        Several of these have exact answers already recorded - the CPM build-up is Base x Audience x
+        Context x Format x Day-part; money moves at OTP verify, base plus 18% GST; targeted is
+        postpaid. Use them rather than paraphrasing.
+      - >
+        Until the Tier A corpus exists this leans entirely on the ontology, so anything outside it
+        gets an honest "I don't have that yet" rather than a guess.
+
+    status: pending_verification
+
+  - id: explain.screen
+    label: What this page is for
+    description: The purpose of a screen, what it shows, and what can be done from it.
+    genie_mode: answer
+    mutating: false
+    utterances:
+      - what is this page
+      - what can I do here
+      - what am I looking at
+      - explain this screen
+      - what's on this dashboard
+
+    authorization:
+      gate: NONE
+
+    execution:
+      state_changing: false
+      method: NONE
+      layer: genie
+
+    gotchas:
+      - >
+        Filter what is offered by the user's role. A campaign manager should not be told about Team
+        Management, which is not in their nav.
+
+    status: pending_verification
+
+  - id: explain.capabilities
+    label: What Genie can do
+    description: Genie describing its own scope, and its limits, honestly.
+    genie_mode: answer
+    mutating: false
+    utterances:
+      - what can you do
+      - how can you help me
+      - what are you for
+      - can you create campaigns
+      - are you able to approve things
+
+    authorization:
+      gate: NONE
+
+    execution:
+      state_changing: false
+      method: NONE
+      layer: genie
+
+    gotchas:
+      - >
+        Be specific about the limits, not vague. "I can plan a campaign and fill in the form, but you
+        submit it - and anything needing an OTP has to be you" is more useful than "I can help with
+        campaigns".
+      - >
+        Answer from the catalog filtered by the user's role, so the list is true for whoever is
+        asking.
+
+    status: pending_verification
+
+  - id: explain.why_unavailable
+    label: Why Genie cannot answer something
+    description: When a metric is blocked or an endpoint is missing, say which and why.
+    genie_mode: answer
+    mutating: false
+    utterances:
+      - why can't you tell me that
+      - why don't you know
+      - why is that unavailable
+      - what's missing
+
+    authorization:
+      gate: NONE
+
+    execution:
+      state_changing: false
+      method: NONE
+      layer: genie
+
+    gotchas:
+      - >
+        Three different reasons, and they deserve different answers - the definition is disputed
+        between screens; the data is not served for this account yet; or the user's role cannot see
+        it. Conflating them is unhelpful.
+      - >
+        Never invent a reason. If the ontology says blocked without a note, say the definition is
+        being confirmed.
+
+    status: pending_verification

@@ -1,0 +1,197 @@
+domain: navigate
+description: >
+  Deep links. No LLM past intent classification, no network call - a route lookup in the ontology.
+  Target is under 200ms, and this is the most common thing anyone will ask an in-dashboard
+  assistant to do.
+
+capabilities:
+
+  - id: navigate.home
+    label: Go to the Command Centre
+    genie_mode: navigate
+    mutating: false
+    target_screen: command_centre
+    utterances:
+      - take me home
+      - go to the command centre
+      - show me the overview
+      - back to the dashboard
+      - open home
+    authorization:
+      gate: PERMISSION
+      permission: VIEW_CLIENT
+    execution:
+      state_changing: false
+      method: NONE
+      layer: frontend
+    status: verified
+    verified_against: "Ontology screen command_centre, route /command-centre"
+
+  - id: navigate.brands
+    label: Go to Brand Management
+    genie_mode: navigate
+    mutating: false
+    target_screen: brand_management
+    utterances:
+      - open brand management
+      - show me my brands
+      - take me to the brands page
+      - go to brands
+    follow_ups:
+      - id: which_brand_to_open
+        kind: entity_choice
+        when: "A brand is named but several match, or a specific brand page is wanted."
+        question: "Which brand?"
+        options_from: "brands under this agency"
+        default_after_asks: null
+        max_asks: 1
+        resolved_by_context: [brand_management, campaign_detail, creative_library]
+        status: pending_verification
+    authorization:
+      gate: PERMISSION
+      permission: VIEW_CLIENT
+    execution:
+      state_changing: false
+      method: NONE
+      layer: frontend
+    status: verified
+    verified_against: "Ontology screen brand_management"
+
+  - id: navigate.inventory
+    label: Go to Inventory Management
+    genie_mode: navigate
+    mutating: false
+    target_screen: inventory_management
+    utterances:
+      - take me to inventory
+      - open inventory management
+      - show me the screens page
+      - go to screen management
+      - open the inventory page
+    authorization:
+      gate: PERMISSION
+      permission: VIEW_CLIENT
+    execution:
+      state_changing: false
+      method: NONE
+      layer: frontend
+    gotchas:
+      - >
+        R5 - the nav tab says "Inventory Management" and the page heading says "Screen Management".
+        Both are listed as utterances deliberately, so the route resolves either way regardless of
+        how the naming question is eventually settled. This is the "absorb" strategy in practice.
+    status: verified
+    verified_against: "Ontology screen inventory_management"
+
+  - id: navigate.wallet
+    label: Go to Wallet Management
+    genie_mode: navigate
+    mutating: false
+    target_screen: wallet_management
+    utterances:
+      - open billing
+      - show me payments
+      - go to wallet management
+      - take me to credits
+      - take me to the wallet
+      - open wallet management
+      - go to my credits
+    authorization:
+      gate: PERMISSION
+      permission: VIEW_WALLET
+    execution:
+      state_changing: false
+      method: NONE
+      layer: frontend
+    gotchas:
+      - >
+        A CAMPAIGN_MANAGER has no VIEW_WALLET permission in the default bundle. Confirm before
+        offering this to that role - it is adjacent to R6.
+    status: verified
+    verified_against: "Ontology screen wallet_management"
+
+  - id: navigate.team
+    label: Go to Team Management
+    genie_mode: navigate
+    mutating: false
+    target_screen: team_management
+    utterances:
+      - open team management
+      - show me my users
+      - go to user management
+      - who is on my team
+    authorization:
+      gate: PERMISSION
+      permission: MANAGE_ASSIGNEES
+      roles: [AD_PARTNER_ADMIN]
+    execution:
+      state_changing: false
+      method: NONE
+      layer: frontend
+    gotchas:
+      - >
+        Team Management is absent from the Campaign Manager's nav entirely. Do not offer this route
+        to that role - it is not a permissions edge case, the screen is simply not theirs.
+      - "Same nav-versus-heading split as inventory: the page reads 'User Management'."
+    status: verified
+    verified_against: "Ontology screen team_management; CM variant lacks the nav item"
+
+  - id: navigate.approvals
+    label: Go to Pending Approvals
+    genie_mode: navigate
+    mutating: false
+    target_screen: notifications_approvals
+    utterances:
+      - show me pending approvals
+      - what needs approving
+      - open the approvals queue
+      - take me to notifications
+    authorization:
+      gate: ROLE
+      roles: [AD_PARTNER_ADMIN, NETWORK_PARTNER_ADMIN]
+    execution:
+      state_changing: false
+      method: NONE
+      layer: frontend
+    gotchas:
+      - >
+        Approvals live under Notifications as a sub-tab, not as a top-level nav item.
+      - >
+        Genie can usefully summarise the queue on the way - how many, whose, total budget, oldest
+        waiting - rather than just opening the page.
+    status: verified
+    verified_against: "Ontology screen notifications_approvals"
+
+  - id: navigate.creatives
+    label: Go to a brand's Creative Library
+    genie_mode: navigate
+    mutating: false
+    target_screen: creative_library
+    utterances:
+      - open the creative library
+      - take me to the creative library
+      - where are my creatives
+      - take me to the asset library
+    follow_ups:
+      - id: which_brand_library
+        kind: entity_choice
+        when: "No brand is in context - the library is per-brand, so one must be chosen."
+        question: "Whose library - which brand?"
+        options_from: "brands under this agency"
+        default_after_asks: null
+        max_asks: 1
+        resolved_by_context: [brand_management, campaign_detail, creative_library]
+        status: pending_verification
+    authorization:
+      gate: PERMISSION
+      permission: VIEW_CAMPAIGN
+    execution:
+      state_changing: false
+      method: NONE
+      layer: frontend
+    gotchas:
+      - >
+        There is no global creative library. It is always a brand's library, reached from the brand
+        page - so a brand must be resolved before this route exists.
+    status: verified
+    verified_against: "Ontology screen creative_library, route /brands/{brandId}/creatives"

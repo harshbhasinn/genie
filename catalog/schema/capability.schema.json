@@ -1,0 +1,426 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://adgrid.ai/genie/catalog/capability.schema.json",
+  "title": "Genie capability file",
+  "type": "object",
+  "required": [
+    "domain",
+    "capabilities"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "domain": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$"
+    },
+    "description": {
+      "type": "string"
+    },
+    "capabilities": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/capability"
+      }
+    }
+  },
+  "$defs": {
+    "role": {
+      "enum": [
+        "ADOPS_ADMIN",
+        "SUPER_ADMIN",
+        "AD_PARTNER_ADMIN",
+        "NETWORK_PARTNER_ADMIN",
+        "CAMPAIGN_MANAGER",
+        "MARKETING_AGENCY_ADMIN",
+        "BRAND_MANAGER",
+        "HARDWARE_MANAGER",
+        "KELLY_WORKER",
+        "STATION_WORKER"
+      ]
+    },
+    "status": {
+      "enum": [
+        "verified",
+        "pending_verification",
+        "blocked",
+        "pending_transcription"
+      ]
+    },
+    "genie_mode": {
+      "description": "answer = read and explain. navigate = deep link. plan = run the planner. prefill = seed a form, human submits. handoff = explain then deep link; Genie cannot complete it.",
+      "enum": [
+        "answer",
+        "navigate",
+        "plan",
+        "prefill",
+        "handoff"
+      ]
+    },
+    "follow_up_kind": {
+      "description": "disambiguation = several meanings share a name. entity_choice = several real records match. slot_fill = a required input is missing. scope = the window or filter is unstated.",
+      "enum": [
+        "disambiguation",
+        "entity_choice",
+        "slot_fill",
+        "scope"
+      ]
+    },
+    "option": {
+      "type": "object",
+      "required": [
+        "value",
+        "label",
+        "hint"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "value": {
+          "type": "string",
+          "description": "An ontology metric id, an entity type, or a literal the handler understands."
+        },
+        "label": {
+          "type": "string",
+          "description": "What the user sees on the chip."
+        },
+        "hint": {
+          "type": "string",
+          "description": "Why you would pick this one. Mandatory — a bare label makes the user guess."
+        }
+      }
+    },
+    "follow_up": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "question"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$"
+        },
+        "kind": {
+          "$ref": "#/$defs/follow_up_kind"
+        },
+        "when": {
+          "type": "string",
+          "description": "Plain-language trigger condition."
+        },
+        "question": {
+          "type": "string"
+        },
+        "options": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/option"
+          }
+        },
+        "options_from": {
+          "type": "string",
+          "description": "For entity_choice: the live source the options are drawn from."
+        },
+        "resolved_by_context": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Screen ids where ui_context already answers this. Do NOT ask on these screens."
+        },
+        "default_after_asks": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "What to assume if the user does not answer. null = drop the request."
+        },
+        "max_asks": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2
+        },
+        "status": {
+          "$ref": "#/$defs/status"
+        }
+      }
+    },
+    "authorization": {
+      "type": "object",
+      "required": [
+        "gate"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "gate": {
+          "enum": [
+            "PERMISSION",
+            "ROLE",
+            "NONE",
+            "UNKNOWN"
+          ]
+        },
+        "permission": {
+          "type": "string"
+        },
+        "roles": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/role"
+          }
+        },
+        "scope": {
+          "type": "string",
+          "description": "Tenancy rule, e.g. entity must be in accessible_client_ids."
+        },
+        "verified_against": {
+          "type": "string"
+        },
+        "client_operation": {
+          "description": "Second gate: @RequireClientOperational. Client status must permit this class of operation. Key rule 5 - only an ACTIVE client can create, edit or confirm; a frozen or suspended client can still read, cancel and pause.",
+          "enum": [
+            "CAMPAIGN_WRITE",
+            "CAMPAIGN_WINDDOWN",
+            "GENERAL_WRITE",
+            "GENERAL_READ",
+            "ANALYTICS_READ",
+            "NONE"
+          ]
+        }
+      }
+    },
+    "execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "method": {
+          "enum": [
+            "GET",
+            "POST",
+            "PUT",
+            "PATCH",
+            "DELETE",
+            "NONE"
+          ]
+        },
+        "path": {
+          "type": "string"
+        },
+        "layer": {
+          "enum": [
+            "bff",
+            "open",
+            "genie",
+            "frontend",
+            "unknown"
+          ]
+        },
+        "pending": {
+          "type": "boolean",
+          "description": "True while the dashboard's new API surface is unpublished."
+        },
+        "note": {
+          "type": "string"
+        },
+        "state_changing": {
+          "type": "boolean",
+          "description": "Does this endpoint change state? NOT the same as GET vs POST - simulate-cost and availability-search are POSTs that change nothing. Genie may only call endpoints where this is false."
+        }
+      },
+      "required": [
+        "state_changing"
+      ]
+    },
+    "capability": {
+      "type": "object",
+      "required": [
+        "id",
+        "label",
+        "genie_mode",
+        "status",
+        "utterances",
+        "authorization"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+        },
+        "label": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "genie_mode": {
+          "$ref": "#/$defs/genie_mode"
+        },
+        "mutating": {
+          "type": "boolean"
+        },
+        "otp_gated": {
+          "type": "boolean",
+          "description": "One of the nine OTP-gated open-service domains. Genie can NEVER complete these."
+        },
+        "utterances": {
+          "type": "array",
+          "minItems": 3,
+          "items": {
+            "type": "string"
+          },
+          "description": "How people actually ask. Becomes the retrieval index AND the few-shot set."
+        },
+        "answers_with": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Ontology metric ids this capability can serve."
+        },
+        "target_screen": {
+          "type": "string",
+          "description": "Ontology screen id, for navigate and handoff."
+        },
+        "follow_ups": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/follow_up"
+          }
+        },
+        "authorization": {
+          "$ref": "#/$defs/authorization"
+        },
+        "execution": {
+          "$ref": "#/$defs/execution"
+        },
+        "preconditions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "refusal": {
+          "type": "string",
+          "description": "What Genie says when it cannot complete this. Required for handoff."
+        },
+        "gotchas": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "status": {
+          "$ref": "#/$defs/status"
+        },
+        "verified_against": {
+          "type": "string"
+        },
+        "blocked_by": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^(R[0-9]{1,2}|D[0-9]{1,2}|B[0-9]{1,2}|N[0-9]{1,2})$"
+          }
+        },
+        "blocked_note": {
+          "type": "string"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "genie_mode": {
+                "const": "handoff"
+              }
+            },
+            "required": [
+              "genie_mode"
+            ]
+          },
+          "then": {
+            "required": [
+              "refusal",
+              "target_screen"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "otp_gated": {
+                "const": true
+              }
+            },
+            "required": [
+              "otp_gated"
+            ]
+          },
+          "then": {
+            "properties": {
+              "genie_mode": {
+                "enum": [
+                  "handoff",
+                  "navigate",
+                  "answer"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "blocked"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "required": [
+              "blocked_by",
+              "blocked_note"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "execution": {
+                "type": "object",
+                "properties": {
+                  "state_changing": {
+                    "const": true
+                  }
+                },
+                "required": [
+                  "state_changing"
+                ]
+              }
+            },
+            "required": [
+              "execution"
+            ]
+          },
+          "then": {
+            "properties": {
+              "execution": {
+                "properties": {
+                  "method": {
+                    "const": "NONE"
+                  }
+                }
+              }
+            }
+          },
+          "$comment": "READ-ONLY INVARIANT: a state-changing endpoint may appear in the catalog for reference, but Genie's method must be NONE - the frontend or the user performs it, never Genie."
+        }
+      ]
+    }
+  }
+}

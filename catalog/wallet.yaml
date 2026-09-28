@@ -1,0 +1,315 @@
+domain: wallet
+description: >
+  Money the agency holds, how it is split between the agency wallet and campaign managers'
+  sub-wallets, and what happens when it runs low. Every mutation here is OTP-gated, so Genie
+  explains and hands off - it never moves money.
+
+capabilities:
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # The worked example: "what's my wallet balance?" has THREE valid answers,
+  # so Genie asks which - and lists them with hints. It does not guess, and
+  # it does not refuse.
+  # ─────────────────────────────────────────────────────────────────────────
+
+  - id: wallet.explain_balance
+    label: Wallet balance
+    description: How much credit the agency holds, and in which pot.
+    genie_mode: answer
+    mutating: false
+    otp_gated: false
+    utterances:
+      - what is my wallet balance
+      - how much money do I have
+      - how much credit is left
+      - show me my balance
+      - what's in the wallet
+      - do I have enough funds
+      - how much can I still spend
+    answers_with: [main_wallet_balance, sub_wallet_total, total_credits_owned]
+
+    follow_ups:
+
+      - id: which_wallet
+        kind: disambiguation
+        when: >
+          The user says "balance", "credit" or "funds" without naming which pot, AND ui_context
+          does not already narrow it.
+        question: "Which balance do you mean?"
+        options:
+          - value: main_wallet_balance
+            label: Main wallet
+            hint: available to allocate - what campaigns actually draw from
+          - value: sub_wallet_total
+            label: Team sub-wallets
+            hint: already handed to campaign managers, not spendable by the agency
+          - value: total_credits_owned
+            label: Total credits
+            hint: main wallet plus all sub-wallets added together
+        resolved_by_context: [wallet_management]
+        default_after_asks: main_wallet_balance
+        max_asks: 1
+        status: verified
+
+    authorization:
+      gate: PERMISSION
+      permission: VIEW_WALLET
+      scope: client must be in accessible_client_ids
+      verified_against: "CAMPAIGN_CREATION_GUIDE.md 2.3 - CAMPAIGN_MANAGER has no wallet permission"
+
+    gotchas:
+      - >
+        POLICY 2026-09-24 - the balance a campaign draws on is apRemaining, equal to balance on /wallet/kpis' sibling /wallet/balance. Sub-wallet totals come from /members/wallet-overview; 'total credits' is a UI aggregate over both and is never a ledger.
+      - >
+        A CAMPAIGN_MANAGER spends from their OWN sub-wallet, so for that role "my balance" most
+        likely means their sub-wallet, not the agency wallet. Reorder the options by role.
+      - >
+        "Total credits" is a UI aggregate, not a ledger. Money is never spent from it - only from
+        the agency wallet (WALLET:CLIENT:{apId}) or one manager's sub-wallet (SUB_WALLET:USER:{userId}).
+      - >
+        R4 is about which of these the COMMAND CENTRE's single "Wallet Balance" card shows. It does
+        not block this capability - Genie can answer the question by asking which.
+
+    status: pending_verification
+
+    execution:
+      state_changing: false
+      method: GET
+      path: "/api/v1/clients/{clientId}/wallet/kpis"
+      layer: bff
+      note: >
+        WalletKpisResponse - apRemaining is the main wallet, apConsumed the spend, unpaid the outstanding invoice.
+
+  - id: wallet.explain_runway
+    label: How long the money lasts
+    description: Days of budget remaining at the recent burn rate.
+    genie_mode: answer
+    mutating: false
+    utterances:
+      - how long will my budget last
+      - when do I run out of money
+      - what's my wallet runway
+      - am I running low on funds
+      - how many days of budget are left
+    answers_with: [wallet_runway_days, wallet_runway_projection]
+
+    follow_ups:
+      - id: whose_runway
+        kind: disambiguation
+        when: "The viewer has a sub-wallet of their own, so 'my runway' is ambiguous."
+        question: "Whose runway - the agency's, or your own sub-wallet?"
+        options:
+          - value: agency
+            label: Agency wallet
+            hint: what the whole agency has left
+          - value: self
+            label: My sub-wallet
+            hint: what you personally can still spend on campaigns
+        resolved_by_context: [wallet_management]
+        default_after_asks: agency
+        max_asks: 1
+        status: pending_verification
+
+    authorization:
+      gate: PERMISSION
+      permission: VIEW_WALLET
+    gotchas:
+      - >
+        POLICY 2026-09-24 - R4 no longer blocks this. The advisor never had to pick a balance, because the backend already picked one.
+      - >
+        R32 - the API returns runwayMONTHS and the deck's card reads 'Runway ~6 days'. Genie reports the API's unit and says 'months'. If a user quotes days, that is the design, not the data.
+
+    execution:
+      state_changing: false
+      method: GET
+      path: "/api/v1/clients/{clientId}/wallet/kpis"
+      layer: bff
+      note: >
+        runwayMonths, lowBalance and lowBalanceThreshold are all computed by the backend. Genie reads them; it does not derive its own.
+    status: pending_verification
+
+  - id: wallet.explain_spending
+    label: Where the money went
+    description: Spend broken down by brand, and the recent transaction history.
+    genie_mode: answer
+    mutating: false
+    utterances:
+      - where is my money going
+      - which brand is spending the most
+      - show me recent transactions
+      - what did we spend this month
+      - break down my spending
+    answers_with: [month_consumption]
+
+    follow_ups:
+
+      - id: spending_window
+        kind: scope
+        when: "No period is stated and ui_context carries no date range."
+        question: "Over what period?"
+        options:
+          - value: this_month
+            label: This month
+            hint: the current calendar month
+          - value: last_30_days
+            label: Last 30 days
+            hint: a rolling window
+          - value: last_month
+            label: Last month
+            hint: the previous complete month
+        resolved_by_context: [wallet_management, command_centre]
+        default_after_asks: this_month
+        max_asks: 1
+        status: pending_verification
+
+    authorization:
+      gate: PERMISSION
+      permission: VIEW_WALLET
+
+    gotchas:
+      - >
+        Pick by question: 'what did we spend this month' is consumption/monthly, 'which brand spends most' is revenue-breakdown brands[], 'show me transactions' is this one.
+      - >
+        Every debit carries 18% GST on the AdGrid-to-AP leg, so a ledger line will not match a campaign's quoted cost. Say so rather than letting the user find the gap.
+      - >
+        Always echo the resolved window back in the answer - "for 1-30 September" - so a misread
+        surfaces immediately rather than three turns later.
+
+    status: pending_verification
+
+    execution:
+      state_changing: false
+      method: GET
+      path: "/api/v1/clients/{clientId}/wallet/transactions"
+      layer: bff
+      note: >
+        The ledger. /wallet/statement is the same money as a statement, /wallet/consumption/monthly the month rollup, and GET /api/v1/revenue-breakdown/{apId} gives the brand split.
+
+  - id: wallet.explain_manager_wallets
+    label: Campaign manager sub-wallets
+    description: What each campaign manager has been allocated, spent and has left.
+    genie_mode: answer
+    mutating: false
+    utterances:
+      - how much does each manager have
+      - show me the sub-wallets
+      - who has budget left
+      - how much has Akshay spent
+      - which manager is running out
+    answers_with: [manager_allocated, manager_spent, manager_balance]
+
+    follow_ups:
+
+      - id: which_manager
+        kind: entity_choice
+        when: "The request names a manager ambiguously, or names none while several exist."
+        question: "Which campaign manager?"
+        options_from: "the agency's campaign managers, from the team endpoint"
+        default_after_asks: null
+        max_asks: 1
+        status: pending_verification
+
+    authorization:
+      gate: PERMISSION
+      permission: VIEW_WALLET
+      roles: [AD_PARTNER_ADMIN]
+      scope: "Sub-wallets belong to the agency's own members only."
+
+    gotchas:
+      - >
+        A campaign manager should see their own summary and not the overview. Scope the call to the role before making it.
+      - >
+        A campaign manager should see their own sub-wallet but probably not their colleagues'.
+        Confirm before offering this to that role.
+
+    status: pending_verification
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Everything below is OTP-gated. Genie explains and hands off. It can
+  # never complete any of these, whatever the user asks.
+  # ─────────────────────────────────────────────────────────────────────────
+
+    execution:
+      state_changing: false
+      method: GET
+      path: "/api/v1/clients/{clientId}/members/wallet-overview"
+      layer: bff
+      note: >
+        MemberWalletOverviewResponse across the team. GET /api/v1/clients/{clientId}/members/{userId}/wallet/summary is one manager.
+
+  - id: wallet.request_funds
+    label: Request funds from AdGrid
+    description: Ask AdGrid to top up the agency wallet.
+    genie_mode: handoff
+    mutating: true
+    otp_gated: true
+    target_screen: wallet_management
+    utterances:
+      - top up my wallet
+      - add funds
+      - I need more credit
+      - request money from AdGrid
+      - recharge the wallet
+    refusal: >
+      I can't top up the wallet myself - it needs an OTP sent to your registered mobile. I'll take
+      you to Wallet Management, where the Request Funds panel is ready.
+
+    authorization:
+      gate: PERMISSION
+      permission: TOPUP_WALLET
+      roles: [AD_PARTNER_ADMIN]
+      verified_against: "WalletOpenServiceImpl uses OtpGrpcClient - one of the nine OTP-gated domains"
+
+    execution:
+      method: NONE
+      path: "/api/v1/clients/{clientId}/wallet/topup/initiate"
+      layer: frontend
+      state_changing: true
+      note: "OTP step 1 of 2. Genie deep-links; it never calls this."
+
+    gotchas:
+      - >
+        This is a REQUEST to AdGrid, not a self-service top-up. The modal reads "Top up your agency
+        wallet. This is the balance your campaigns run on."
+      - >
+        A CAMPAIGN_MANAGER has no TOPUP_WALLET permission. For that role Genie should say the wallet
+        is short and suggest asking an admin, rather than offering this at all (R6).
+
+    status: verified
+    verified_against: "OtpGrpcClient usage in WalletOpenServiceImpl"
+
+  - id: wallet.allocate_to_subwallet
+    label: Allocate funds to a campaign manager
+    description: Move credit from the agency wallet into a manager's sub-wallet.
+    genie_mode: handoff
+    mutating: true
+    otp_gated: true
+    target_screen: wallet_management
+    utterances:
+      - give Akshay more budget
+      - allocate funds to a manager
+      - move money to a sub-wallet
+      - top up my campaign manager
+      - transfer budget to the team
+    refusal: >
+      Moving money into a sub-wallet needs an OTP, so I can't do it for you. I'll open Wallet
+      Management with the allocation panel.
+
+    authorization:
+      gate: PERMISSION
+      permission: ADJUST_WALLET
+      roles: [AD_PARTNER_ADMIN]
+      verified_against: "Deck shows a Confirm sub-wallet top up OTP modal"
+
+    execution:
+      method: NONE
+      path: "/api/v1/clients/{clientId}/members/{userId}/wallet/allocate/initiate"
+      layer: frontend
+      state_changing: true
+      note: "OTP step 1 of 2. Genie deep-links only."
+
+    preconditions:
+      - "Agency main wallet balance must cover the allocation."
+
+    status: verified
+    verified_against: "OtpGrpcClient usage in WalletOpenServiceImpl"

@@ -1,0 +1,286 @@
+screen:
+  id: notifications_approvals
+  kind: screen
+  title: Campaign Approvals
+  route: /notifications/approvals
+  nav_label: Pending Approvals
+  audience: [AD_PARTNER_ADMIN]
+  source_frame: "Agency Admin Dashboard (1.5).docx - Notifications and Approval (image2)"
+  purpose: >
+    Maker-checker. Campaigns created by campaign managers sit here until an admin authorises them
+    with an OTP. Rejected ones go back to the manager with a remark.
+  entities: [campaign, brand, user, wallet]
+  related_screens: [command_centre, campaign_detail, wallet_management]
+
+  filters:
+    - id: period
+      label: Period
+      default: this_month
+      unset_means: "Never unset."
+    - id: manager
+      label: Manager
+      default: "All managers"
+      unset_means: Requests from every campaign manager
+    - id: delivery_mode
+      label: Type
+      default: All
+      options: [All, Broadcasting, Targeted]
+      unset_means: Both delivery modes
+    - id: decision
+      label: Decision
+      default: All
+      options: [All, Approved, Rejected]
+      unset_means: Pending, approved and rejected together
+
+  sections:
+    - id: kpis
+      label: Approval KPIs
+      metrics: [pending_approvals, budget_awaiting_approval, approvals_by_type, oldest_waiting]
+    - id: request_table
+      label: Requests
+      subtitle: "Campaign, type, inventory tier, budget, flight, and inline approve/reject."
+    - id: request_detail
+      label: Expanded request
+      subtitle: "Campaign plan, inventory coverage and a sub-wallet sufficiency check."
+      metrics: [request_est_impressions, request_est_reach, subwallet_sufficiency]
+
+  metrics:
+
+    - id: pending_approvals
+      source:
+        api: "GET /api/v1/approvals/queue"
+        method: GET
+        scope_key: client_id
+        field: "totalElements"
+      label: Pending Approvals
+      definition: Campaign requests awaiting an admin's authorisation.
+      unit: count
+      freshness: live
+      deck_value: "7 requests - across 3 campaign managers"
+      gotchas:
+        - >
+          Read the envelope, not the row count. Filter with the status parameter rather than counting client-side.
+        - >
+          These are APPROVAL REQUESTS, not campaigns. Each carries its own id (deck: REQ-2608-01),
+          distinct from the campaign id. Pending / Approved / Rejected are request states, not the
+          campaign state machine.
+      status: pending_verification
+
+    - id: budget_awaiting_approval
+      source:
+        api: "GET /api/v1/approvals/queue"
+        method: GET
+        scope_key: client_id
+        field: "requests[].quantityValues"
+      label: Budget Awaiting Approval
+      definition: Total budget of all pending requests.
+      unit: currency_inr
+      freshness: live
+      deck_value: "61.50 L - to be drawn from sub-wallets"
+      gotchas:
+        - >
+          quantityValues is a free-form object in the spec, so which key holds the budget is unknown until a real response is read. Do not guess a key name.
+        - >
+          The sub-label confirms manager-created campaigns are paid from the MANAGER'S SUB-WALLET,
+          not the agency wallet.
+      status: pending_verification
+
+    - id: approvals_by_type
+      source:
+        api: "GET /api/v1/approvals/queue"
+        method: GET
+        scope_key: client_id
+        field: "requests[].operationCode"
+      label: By Campaign Type
+      definition: Split of pending requests between Broadcasting and Targeted.
+      unit: count
+      freshness: live
+      gotchas:
+        - >
+          operationCode is the operation awaiting approval, not the campaign type. Campaign confirm is one of several things that can queue here.
+      status: pending_verification
+
+    - id: oldest_waiting
+      source:
+        api: "GET /api/v1/approvals/queue"
+        method: GET
+        scope_key: client_id
+        field: "requests[].createdOnEpochMs, against now"
+      label: Oldest Waiting
+      definition: Age of the longest-waiting pending request.
+      unit: days
+      freshness: live
+      deck_value: "3 days - approve promptly to hold flight dates"
+      gotchas:
+        - >
+          finalDeadlineAtEpochMs matters more than age when it is present - a request close to its deadline is more urgent than an older one that is not.
+        - >
+          THE APPROVAL_BACKLOG ADVISOR IS SPECIFIED HERE, including why it matters - waiting risks
+          the requested flight dates. Slots can close between request and confirm, and
+          initiate-confirm returns start_date_unavailable_slots for exactly that case.
+      status: pending_verification
+
+    - id: request_est_impressions
+      label: Est. impressions
+      definition: Impressions the requested campaign is projected to deliver.
+      unit: count
+      freshness: live
+      gotchas:
+        - >
+          The approval row carries quantityValues and nothing typed. Estimated delivery for a queued request is not served.
+      status: blocked
+      blocked_by: [R7]
+      blocked_note: >
+        Nothing typed on the approval row returns estimated impressions or reach.
+
+    - id: request_est_reach
+      label: Est. reach
+      definition: People the requested campaign is projected to reach.
+      unit: count
+      freshness: live
+      gotchas:
+        - >
+          The approval row carries quantityValues and nothing typed. Estimated delivery for a queued request is not served.
+        - >
+          POLICY 2026-09-24 - resolved in favour of the API/backend over the design. See RESOLUTION-POLICY.md.
+          An estimate on the approval request, not a measurement.
+      status: blocked
+      blocked_by: [R7]
+      blocked_note: >
+        Nothing typed on the approval row returns estimated impressions or reach.
+
+    - id: subwallet_sufficiency
+      source:
+        api: "DERIVED - the request's budget against GET /api/v1/clients/{clientId}/members/{userId}/wallet/summary"
+        method: NONE
+        scope_key: client_id
+        field: "currentBalance against the request amount"
+      label: Sub-wallet sufficiency
+      definition: Whether the requesting manager's sub-wallet covers the campaign budget.
+      formula: "manager sub-wallet balance compared against the campaign budget"
+      unit: text
+      freshness: live
+      deck_value: "Sub-wallet sufficient - balance 9.00 L vs budget 4.60 L"
+      gotchas:
+        - >
+          This is the single most useful thing Genie can add to the approvals queue: whether the manager who raised each request can actually fund it. Both sides are real reads.
+        - >
+          Coverage is balance against cost plus 18% GST on the AdGrid leg, not against the bare cost.
+        - >
+          THE SUBWALLET_SHORT ADVISOR IS SPECIFIED HERE. Note the real coverage check at
+          initiate-confirm is balance >= adgridCost x 1.18, so a sufficiency display that ignores
+          GST would be optimistic by 18%.
+      status: pending_verification
+
+  actions:
+
+    - capability: campaign.approve
+      label: Approve campaign
+      mutating: true
+      otp_gated: true
+      gate: ROLE
+      roles: [AD_PARTNER_ADMIN, NETWORK_PARTNER_ADMIN]
+      genie_mode: navigate
+      status: verified
+      verified_against: >
+        Approvals banner - "Approving requires OTP verification". CAMPAIGN_CREATION_GUIDE.md key
+        rule 16 - only confirm needs maker-checker approval.
+
+    - capability: campaign.reject
+      label: Reject
+      mutating: true
+      otp_gated: false
+      gate: ROLE
+      roles: [AD_PARTNER_ADMIN, NETWORK_PARTNER_ADMIN]
+      genie_mode: navigate
+      status: pending_verification
+
+    # The three transitions the API has and the designs do not. Found in the live spec,
+    # modelled here so Genie can at least name them correctly when a user hits one.
+
+    - capability: campaign.send_back
+      label: Send back for changes
+      mutating: true
+      otp_gated: false
+      gate: ROLE
+      roles: [AD_PARTNER_ADMIN, NETWORK_PARTNER_ADMIN]
+      genie_mode: navigate
+      status: pending_verification
+      verified_against: >
+        POST /api/v1/approvals/{referenceCode}/send-back, body ApprovalReasonRequest. The checker's
+        third option: not approved, not rejected - returned to the maker to fix and resubmit.
+
+    - capability: campaign.withdraw_request
+      label: Withdraw my request
+      mutating: true
+      otp_gated: false
+      gate: ROLE
+      roles: [CAMPAIGN_MANAGER, AD_PARTNER_ADMIN]
+      genie_mode: navigate
+      status: pending_verification
+      verified_against: >
+        POST /api/v1/approvals/{referenceCode}/withdraw, no body. The MAKER's own escape hatch -
+        pull a request back before anyone acts on it.
+
+    - capability: campaign.resubmit_request
+      label: Resubmit
+      mutating: true
+      otp_gated: false
+      gate: ROLE
+      roles: [CAMPAIGN_MANAGER, AD_PARTNER_ADMIN]
+      genie_mode: navigate
+      status: pending_verification
+      verified_against: >
+        POST /api/v1/approvals/{referenceCode}/resubmit, no body. Puts a sent-back request back in
+        the queue, at currentStage 1 of totalStages.
+
+  notes:
+    - >
+      D10 - THREE APPROVAL TRANSITIONS EXIST IN THE API AND NOWHERE IN THE DESIGNS: send-back,
+      withdraw and resubmit. The deck models approval as a two-way decision, approve or reject, and
+      the real flow has five states. A maker can pull a request back; a checker can return it for
+      changes without killing it; and a returned request can come back round. Genie must know all
+      five or it will tell a campaign manager their only options are to wait or start again.
+    - >
+      Approval status is a lifecycle, not a flag. ApprovalRequestSummaryResponse carries
+      currentStage and totalStages, so multi-stage approval is real - 'approved' can mean stage 1
+      of 2. actionable says whether THIS viewer can act; myVerdict says what they already decided.
+      Genie reads all four before saying anything about who is waiting on whom.
+    - >
+      Only approve is OTP-gated. Reject and send-back take a reason; withdraw and resubmit take no
+      body at all. That asymmetry is worth stating when a user asks why one needs a code and the
+      others do not.
+    - >
+      R21 RESOLVED HERE. The banner states it outright - "Campaigns created by your managers stay in
+      Pending until you authorise them. Approving requires OTP verification - select one or many and
+      approve collectively. Approved campaigns schedule to their flight dates; rejected ones return
+      to the manager with your remark."
+    - >
+      GENIE REQUIREMENT - the prefill CTA label is role-dependent. An admin sees "Activate"; a
+      campaign manager sees "Submit for approval". Templating either one is a wrong answer for the
+      other role.
+    - >
+      The authorise modal needs BOTH a 6-digit OTP sent to the admin's registered mobile AND a
+      ticked acknowledgement of the Terms of Service and Campaign Policy. Genie can never complete
+      it - it can only summarise what is pending and deep-link.
+    - >
+      Approving is BULK-CAPABLE - "select one or many and approve collectively". The modal shows a
+      combined total and an itemised list.
+    - >
+      Rejection carries a free-text remark back to the manager. Genie should be able to read that
+      back when asked why a campaign was rejected.
+    - >
+      R26 - the expanded request shows "Objective: Footfall", which is not among the Launch wizard's
+      six objectives. Resolved as a finding: objective is not a backend field, so the two UI lists
+      simply need to agree.
+    - >
+      R27 - the expanded request shows named "Audience segments" (deck: "Youth 18-28", "Cafe &
+      hangout visitors"). No such concept exists in the backend; targeting is city x shopType x
+      ageGroups x genders. Either an unbuilt feature or design fiction.
+    - >
+      R28 - the expanded request shows "Day-part: 11:00 - 22:00" as a continuous range, where every
+      other screen uses four named 3-hour bands starting at 10:00. Targeted campaigns book no slots
+      at all, so this likely has nothing behind it.
+    - >
+      Each row carries an EMPLOYEE or AGENCY badge on the submitter, matching the Employee /
+      Marketing Agency split on the Add New User form.

@@ -1,0 +1,369 @@
+screen:
+  id: campaign_detail
+  kind: screen
+  title: Campaign Detail
+  route: /brands/{brandId}/campaigns/{campaignId}
+  audience: [AD_PARTNER_ADMIN, CAMPAIGN_MANAGER, BRAND_MANAGER]
+  source_frame: "Agency Admin Dashboard (1.5).docx - Brand Management (image3), BROADCASTING CAMPAIGNS group"
+  variants: [broadcasting, targeted]
+  purpose: >
+    How one campaign is delivering: pace against plan, spend against budget, where it is playing,
+    when its audience is watching, and who that audience is. The richest screen in the product and
+    the one most questions will be asked about.
+  entities: [campaign, brand, creative, device]
+  related_screens: [brand_management, creative_library, launch_campaign]
+
+  filters:
+    - id: city
+      label: City
+      default: "All cities"
+      unset_means: Every city this campaign runs in
+    - id: category
+      label: Category
+      default: "All types"
+      unset_means: Every store category
+    - id: daypart
+      label: Day-part
+      default: null
+      options: [Morning, Afternoon, Evening, Night]
+      unset_means: >
+        Only the dayparts this campaign actually booked. Unbooked dayparts render greyed out and
+        labelled "not sold".
+
+  sections:
+    - id: header
+      label: Campaign header
+      subtitle: "Name, id, delivery mode, status, flight, days remaining, percent delivered."
+      metrics: [campaign_percent_delivered, campaign_active_screens, campaign_stores,
+                campaign_verified_viewers_per_day, campaign_screen_uptime]
+    - id: kpi_row
+      label: Headline KPIs
+      metrics: [campaign_impressions, campaign_reach, campaign_frequency, campaign_cpm,
+                campaign_spend, campaign_verified_view_rate]
+    - id: delivery_performance
+      label: Delivery performance
+      subtitle: "Daily series with a dashed projection. Cumulative / Daily toggle."
+    - id: delivery_pacing
+      label: Delivery & Pacing
+      metrics: [campaign_percent_delivered, campaign_time_elapsed, campaign_projected_final]
+    - id: performance_breakdown
+      label: Performance breakdown
+      subtitle: "By City / By Day-part / By Category / By Creative. Reflects active filters."
+    - id: audience_watching
+      label: When your audience is watching
+      subtitle: "Hourly delivery across the sellable day."
+    - id: audience_profile
+      label: Audience Profile
+      subtitle: "camera-measured, for this campaign"
+      metrics: [campaign_audience_profile]
+
+  metrics:
+
+    - id: campaign_impressions
+      label: Impressions
+      definition: Ad-views this campaign has delivered.
+      unit: count
+      freshness: unknown
+      gotchas:
+        - >
+          CampaignMetricsResponse returns four fields - campaignId, status, budget, totalScreens. It is a configuration read, not a delivery read. This metric was previously pointed at it, which asserted something the spec does not support.
+        - >
+          POST /api/v1/dashboard/content returns impressions at CLIENT scope. It cannot be narrowed to one campaign unless that campaign's creative is unique to it, in which case the creative filter isolates it - which is a coincidence, not a feature.
+        - "Impressions are playback events, not people. Reach is the de-duplicated person count."
+        - "R18 - named 'Impressions' here, 'Impressions Delivered' / 'Total Daily Impressions' / 'Daily Impression' elsewhere."
+      status: blocked
+      blocked_by: [R7]
+      blocked_note: >
+        Per-campaign delivery is not served on this surface. Genie can state the campaign's budget, state and screen count, and must say plainly that delivery is not available per campaign.
+
+    - id: campaign_reach
+      label: Reach
+      definition: People reached by this campaign.
+      unit: count
+      freshness: unknown
+      gotchas:
+        - >
+          CampaignMetricsResponse returns four fields - campaignId, status, budget, totalScreens. It is a configuration read, not a delivery read. This metric was previously pointed at it, which asserted something the spec does not support.
+        - >
+          Even at client scope the audience window gives window-unique persons for the agency, not for one campaign.
+        - >
+          POLICY 2026-09-24 - resolved in favour of the API/backend over the design. See RESOLUTION-POLICY.md.
+          Reach (best day) - ContentWindow.reach is max single-day distinct persons, not window-unique. Label it as such.
+        - >
+          The screen shows Impressions, Reach and Frequency together with reach = impressions /
+          frequency - the same identity the Planner's reach model uses. Reassuring, but R12 still
+          applies: four different reach concepts exist and only uniqueVisitors is window-unique.
+      status: blocked
+      blocked_by: [R7]
+      blocked_note: >
+        Per-campaign delivery is not served on this surface. Genie can state the campaign's budget, state and screen count, and must say plainly that delivery is not available per campaign.
+
+    - id: campaign_frequency
+      label: Frequency
+      definition: Average number of times a reached person saw this campaign.
+      formula: "impressions / reach"
+      unit: multiplier
+      freshness: unknown
+      gotchas:
+        - >
+          CampaignMetricsResponse returns four fields - campaignId, status, budget, totalScreens. It is a configuration read, not a delivery read. This metric was previously pointed at it, which asserted something the spec does not support.
+        - >
+          Frequency is impressions over reach, and neither is served per campaign, so the ratio is doubly unavailable.
+        - >
+          Frequency is a first-class product concept here, which validates the Planner's approach -
+          S6 derives reach as impressions / avg_frequency from a curve fitted on person_day.
+      status: blocked
+      blocked_by: [R7]
+      blocked_note: >
+        Per-campaign delivery is not served on this surface. Genie can state the campaign's budget, state and screen count, and must say plainly that delivery is not available per campaign.
+
+    - id: campaign_cpm
+      label: CPM
+      definition: Price per 1,000 impressions for this campaign.
+      unit: cpm_inr
+      freshness: live
+      gotchas:
+        - >
+          CampaignMetricsResponse returns four fields - campaignId, status, budget, totalScreens. It is a configuration read, not a delivery read. This metric was previously pointed at it, which asserted something the spec does not support.
+        - >
+          Budget is served; impressions are not. CPM needs both.
+      status: blocked
+      blocked_by: [R7]
+      blocked_note: >
+        Per-campaign delivery is not served on this surface. Genie can state the campaign's budget, state and screen count, and must say plainly that delivery is not available per campaign.
+
+    - id: campaign_spend
+      label: Spend
+      definition: Amount spent against this campaign's budget so far.
+      unit: currency_inr
+      freshness: live
+      gotchas:
+        - >
+          CampaignMetricsResponse returns four fields - campaignId, status, budget, totalScreens. It is a configuration read, not a delivery read. This metric was previously pointed at it, which asserted something the spec does not support.
+        - >
+          budget on CampaignMetricsResponse is what was COMMITTED, not what has been consumed. Presenting it as spend-to-date would overstate spend on every campaign that has not finished.
+        - >
+          For a broadcast campaign the wallet was debited in full at confirm (base + 18% GST), so
+          "spend" here is delivery-weighted consumption, not a cash movement. Targeted campaigns are
+          postpaid and accrue per impression.
+      status: blocked
+      blocked_by: [R7]
+      blocked_note: >
+        Per-campaign delivery is not served on this surface. Genie can state the campaign's budget, state and screen count, and must say plainly that delivery is not available per campaign.
+
+    - id: campaign_verified_view_rate
+      label: Verified view rate
+      unit: percent
+      camera_measured: true
+      freshness: batch_6h
+      gotchas:
+        - >
+          ContentWindowResponse carries impressions and totalViews, but nothing states that totalViews is the camera-confirmed subset. The same gap as verified_impressions on the Command Centre.
+        - >
+          POLICY 2026-09-24 - resolved in favour of the API/backend over the design. See RESOLUTION-POLICY.md.
+          A SHARE of impressions confirmed seen. Distinct from 'verified viewers', which is a count.
+        - >
+          R16 - three "verified" terms exist: "Verified Impressions" on the Command Centre (a share
+          of impressions), "Verified view rate" here, and "verified viewers/day" in this screen's own
+          header (a count of people). At minimum a share and a count are different units.
+      status: blocked
+      blocked_by: [R7]
+      blocked_note: >
+        No field returns a camera-confirmed count or share, at any scope.
+
+    - id: campaign_verified_viewers_per_day
+      label: Verified viewers / day
+      unit: per_day
+      camera_measured: true
+      freshness: batch_6h
+      gotchas:
+        - >
+          ContentWindowResponse carries impressions and totalViews, but nothing states that totalViews is the camera-confirmed subset. The same gap as verified_impressions on the Command Centre.
+        - >
+          POLICY 2026-09-24 - resolved in favour of the API/backend over the design. See RESOLUTION-POLICY.md.
+          A COUNT of people. Distinct from 'verified view rate', which is a share.
+      status: blocked
+      blocked_by: [R7]
+      blocked_note: >
+        No field returns a camera-confirmed count or share, at any scope.
+
+    - id: campaign_percent_delivered
+      label: Percent delivered
+      definition: Impressions delivered as a share of the plan.
+      formula: "impressions delivered / planned impressions"
+      unit: percent
+      freshness: unknown
+      gotchas:
+        - >
+          CampaignMetricsResponse returns four fields - campaignId, status, budget, totalScreens. It is a configuration read, not a delivery read. This metric was previously pointed at it, which asserted something the spec does not support.
+        - >
+          Needs delivered impressions against planned. Neither side is served per campaign.
+      status: blocked
+      blocked_by: [R7]
+      blocked_note: >
+        Per-campaign delivery is not served on this surface. Genie can state the campaign's budget, state and screen count, and must say plainly that delivery is not available per campaign.
+
+    - id: campaign_time_elapsed
+      source:
+        api: "DERIVED - startDate and endDate from GET /api/v1/campaigns/{campaignId} against today"
+        method: NONE
+        scope_key: client_id
+        field: "startDate, endDate"
+      label: Time elapsed
+      definition: Days elapsed as a share of the flight.
+      formula: "days elapsed / total flight days"
+      unit: percent
+      freshness: live
+      gotchas:
+        - >
+          Pure arithmetic on the campaign's own dates, so it works even while delivery is unserved. Pair it with percent-delivered only when that becomes available - elapsed time alone says nothing about pacing.
+        - >
+          PACING IS DEFINED BY THIS SCREEN. The panel states it plainly: "The marker shows time
+          elapsed. Delivery tracking the marker = healthy pacing; ahead = burning fast; behind =
+          under-delivering." Lift directly into the budget_pacing and underdelivery advisors.
+        - >
+          CRITICAL: a Targeted campaign chooses a pacing mode - Even or Accelerated. "Behind" is a
+          defect under Even and the EXPECTED behaviour under Accelerated. The advisor must read
+          campaign pacing before deciding anything is wrong.
+      status: pending_verification
+
+    - id: campaign_projected_final
+      label: Projected final
+      definition: Impressions this campaign is projected to finish on, at the current rate.
+      unit: count
+      freshness: unknown
+      gotchas:
+        - >
+          CampaignMetricsResponse returns four fields - campaignId, status, budget, totalScreens. It is a configuration read, not a delivery read. This metric was previously pointed at it, which asserted something the spec does not support.
+        - >
+          A projection over a pacing curve that has no inputs.
+      status: blocked
+      blocked_by: [R7]
+      blocked_note: >
+        Per-campaign delivery is not served on this surface. Genie can state the campaign's budget, state and screen count, and must say plainly that delivery is not available per campaign.
+
+    - id: campaign_active_screens
+      source:
+        api: "GET /api/v1/campaign-oversight/campaigns/{campaignId}/metrics"
+        method: GET
+        scope_key: client_id
+        field: "totalScreens"
+      label: Active screens
+      unit: count
+      freshness: unknown
+      gotchas:
+        - >
+          R8 - 'Screens in use'. This is what the campaign booked, not what is powered on right now. For live status, the roster is the call.
+        - >
+          POLICY 2026-09-24 - resolved in favour of the API/backend over the design. See RESOLUTION-POLICY.md.
+          Screens in use on this campaign - CampaignMetricsResponse.totalScreens.
+      status: pending_verification
+
+    - id: campaign_stores
+      label: Stores
+      definition: Distinct shops this campaign is playing in.
+      unit: count
+      freshness: unknown
+      gotchas:
+        - >
+          CampaignMetricsResponse returns four fields - campaignId, status, budget, totalScreens. It is a configuration read, not a delivery read. This metric was previously pointed at it, which asserted something the spec does not support.
+        - >
+          totalScreens is served; a store count is not. A store holds several screens, so the two are not interchangeable.
+        - "A store is a shop; a screen is a device inside it. One store can hold several screens."
+      status: blocked
+      blocked_by: [R7]
+      blocked_note: >
+        Per-campaign delivery is not served on this surface. Genie can state the campaign's budget, state and screen count, and must say plainly that delivery is not available per campaign.
+
+    - id: campaign_screen_uptime
+      source:
+        api: "GET /api/v1/analytics/devices/{deviceId}/uptime"
+        method: GET
+        scope_key: client_id
+        field: "summary, per device"
+      definition: "Share of scheduled playtime this campaign's screens were up."
+      unit: percent
+      freshness: unknown
+      label: Screen uptime
+      gotchas:
+        - >
+          Per device only, so a campaign figure means fanning out across the campaign's screens and averaging. Genie says how many screens the average covers, or answers for one screen.
+        - >
+          POLICY 2026-09-24 - definition taken from the deck's annotation card, with the backend's vocabulary where they differ. See RESOLUTION-POLICY.md.
+      status: pending_verification
+
+    - id: campaign_audience_profile
+      label: Audience Profile
+      definition: Gender and age mix of the people this campaign reached.
+      unit: percent
+      camera_measured: true
+      freshness: batch_6h
+      gotchas:
+        - >
+          POST /api/v1/dashboard/audience DOES return genderSplit and ageDistribution - but at CLIENT scope, across everything the agency runs. That answers 'who sees our ads', not 'who saw this campaign'. Genie may offer the agency-level figure, clearly labelled as the wider question.
+        - >
+          POLICY 2026-09-24 - resolved in favour of the API/backend over the design. See RESOLUTION-POLICY.md.
+          Not a naming conflict - ContentWindowResponse still carries no genderSplit or ageDistribution. No source exists.
+        - >
+          Age bands here are the design's five (18-24, 25-34, 35-44, 45-54, 55+); the analytics API
+          returns four opaque keys (18-25, 26-35, 36-50, 50+). See R15.
+      status: blocked
+      blocked_by: [R7]
+      blocked_note: >
+        Demographics exist at agency scope and not at campaign scope. Offering the agency figure as if it were the campaign's would be wrong by a wide margin on any narrow buy.
+
+  actions:
+    - capability: campaign.pause
+      label: Pause campaign
+      mutating: true
+      otp_gated: true
+      gate: PERMISSION
+      permission: PAUSE_CAMPAIGN
+      genie_mode: navigate
+      status: verified
+      verified_against: "CAMPAIGN_CREATION_GUIDE.md key rule 17 - pause needs an OTP"
+
+    - capability: campaign.cancel
+      label: Cancel campaign
+      mutating: true
+      otp_gated: true
+      gate: PERMISSION
+      permission: DELETE_CAMPAIGN
+      roles: [AD_PARTNER_ADMIN, NETWORK_PARTNER_ADMIN]
+      genie_mode: navigate
+      status: verified
+      verified_against: >
+        CAMPAIGN_CREATION_GUIDE.md 2.3 - CAMPAIGN_MANAGER cannot cancel, lacks DELETE_CAMPAIGN.
+        Key rule 19 - only SCHEDULED or LIVE campaigns can be cancelled.
+
+    - capability: campaign.view_creatives
+      label: Creatives
+      mutating: false
+      gate: PERMISSION
+      permission: VIEW_CAMPAIGN
+      genie_mode: navigate
+      status: pending_verification
+
+    - capability: campaign.view_map
+      label: Map View
+      mutating: false
+      gate: PERMISSION
+      permission: VIEW_CAMPAIGN
+      genie_mode: navigate
+      status: pending_transcription
+
+  notes:
+    - >
+      THE DAYPART BANDS ON THIS SCREEN ARE CORRECT. "When your audience is watching" is subtitled
+      "hourly delivery - 10AM-10PM" and bands Morning 10-1, Afternoon 1-4, Evening 4-7, Night 7-10,
+      with Night marked "not sold". This matches the backend TimeSlots enum. The Command Centre's
+      Daypart Occupancy chart is the one being corrected (D1).
+    - >
+      R17 - the header carries a blue "Broadcasted" badge beside a green "Live" badge. "Broadcasted"
+      is the DELIVERY MODE (BROADCAST), not a status. Only "Live" is a status.
+    - >
+      The header also shows "Guaranteed - Broadcasting" and a "Payment Status" chip. Neither is yet
+      traced to a backend field.
+    - >
+      Targeted campaigns render a different widget set - no screen counts, no daypart booking, and
+      auction figures instead. Not yet transcribed.

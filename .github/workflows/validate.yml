@@ -1,0 +1,57 @@
+name: validate
+
+# The whole value of this repo is that its description of the dashboard stays
+# honest. These five checks are what enforce that, so they run on everything.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: validate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: tools/requirements.txt
+
+      - run: pip install -r tools/requirements.txt
+
+      - name: Ontology — schema, cross-references, status ledger
+        run: python tools/validate_ontology.py
+
+      - name: Catalog — capabilities, utterance collisions, THE READ-ONLY INVARIANT
+        run: python tools/validate_catalog.py
+
+      - name: Golden set — every id still resolves
+        run: python tools/validate_golden.py
+
+      - name: Sources — every declared field exists on its endpoint
+        # Fails on a mapping the OpenAPI spec contradicts, and on a stale VERIFY.md.
+        # Regenerate with: python tools/verify_sources.py --write
+        run: python tools/verify_sources.py --check
+
+      - name: Knowledge base — not stale
+        # Regenerate with: python tools/render_kb.py
+        run: python tools/render_kb.py --check
+
+      - name: Nothing credential-shaped got committed
+        # sweep.py's input is a JWT and its output is live tenant data. .gitignore
+        # covers both; this is the backstop for a --force past it.
+        run: |
+          if git ls-files | grep -Ei '\.(jwt|token)$|^\.env$|sweep-results.*\.json$'; then
+            echo "::error::A credential or live-data file is tracked. See CONTRIBUTING.md §8."
+            exit 1
+          fi
+          echo "clean"
