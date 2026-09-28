@@ -178,7 +178,9 @@ def main() -> int:
         if f.name not in rendered:
             f.unlink()
     for name, body in rendered.items():
-        (OUT / name).write_text(body, encoding="utf-8")
+        # newline="\n" explicitly: text mode would emit CRLF on Windows, and a
+        # generated file that differs by platform makes --check disagree across machines.
+        (OUT / name).write_text(body, encoding="utf-8", newline="\n")
 
     words = sum(len(b.split()) for b in rendered.values())
     print(f"Rendered {len(rendered)} file(s) into kb/generated/ — about {words:,} words.")

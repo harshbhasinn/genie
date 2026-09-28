@@ -380,7 +380,8 @@ def main():
               if stale else "\nVERIFY.md is current.")
 
     if "--write" in args:
-        OUT.write_text(text, encoding="utf-8")
+        # newline="\n" explicitly — see the same note in render_kb.py.
+        OUT.write_text(text, encoding="utf-8", newline="\n")
         print(f"\nWrote {OUT.relative_to(ROOT)}")
 
     # A mapping the spec contradicts is a failure in every mode, not just --check.
