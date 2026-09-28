@@ -6,7 +6,7 @@ audience: [AD_PARTNER_ADMIN]
 client_scope: null
 status: published
 owner: genie-build
-verified_at: 2026-09-24
+source_digest: 77f8a5793227
 verified_against: ontology/screens/wallet-management.yaml
 effective_from: null
 effective_to: null

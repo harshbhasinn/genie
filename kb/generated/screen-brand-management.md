@@ -6,7 +6,7 @@ audience: [AD_PARTNER_ADMIN, CAMPAIGN_MANAGER]
 client_scope: null
 status: published
 owner: genie-build
-verified_at: 2026-09-24
+source_digest: ea52e57edeaa
 verified_against: ontology/screens/brand-management.yaml
 effective_from: null
 effective_to: null
