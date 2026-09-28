@@ -6,7 +6,7 @@ audience: [AD_PARTNER_ADMIN]
 client_scope: null
 status: published
 owner: genie-build
-verified_at: 2026-09-24
+source_digest: 618a85cb719f
 verified_against: ontology/screens/notifications-approvals.yaml
 effective_from: null
 effective_to: null

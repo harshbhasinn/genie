@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import argparse
 import sys
-from datetime import date
+import hashlib
 from pathlib import Path
 
 try:
@@ -37,7 +37,7 @@ audience: [{audience}]
 client_scope: null
 status: published
 owner: genie-build
-verified_at: {today}
+source_digest: {digest}
 verified_against: ontology/screens/{src}
 effective_from: null
 effective_to: null
@@ -50,13 +50,13 @@ BANNER = (
 )
 
 
-def render_screen(doc: dict, src: str) -> tuple[str, str]:
+def render_screen(doc: dict, src: str, digest: str = "") -> tuple[str, str]:
     s = doc["screen"]
     sid = s["id"]
     lines: list[str] = []
     lines.append(FRONTMATTER.format(
         doc_id=f"screen-{sid.replace('_', '-')}",
-        title=s["title"], today=date.today().isoformat(), src=src,
+        title=s["title"], digest=digest, src=src,
         # audience is a PRE-ANN retrieval filter, not decoration. It must be the
         # screen's real audience, or a role retrieves docs it may not see.
         audience=", ".join(s["audience"])))
@@ -145,10 +145,16 @@ def main() -> int:
     OUT.mkdir(parents=True, exist_ok=True)
     rendered: dict[str, str] = {}
     for p in sorted(SCREENS.glob("*.yaml")):
-        doc = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+        raw = p.read_text(encoding="utf-8")
+        doc = yaml.safe_load(raw) or {}
         if "screen" not in doc:
             continue
-        name, body = render_screen(doc, p.name)
+        # Digest of the SOURCE, not today's date. A render date churns the file on
+        # every re-render and fails --check on any day after the last one, which
+        # trains people to ignore the gate. It also falsely implies someone
+        # verified the content, when all that happened was a render.
+        digest = hashlib.sha256(raw.replace("\r\n", "\n").encode()).hexdigest()[:12]
+        name, body = render_screen(doc, p.name, digest)
         rendered[name] = body
 
     if args.check:
