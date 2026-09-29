@@ -20,14 +20,24 @@ from dataclasses import dataclass, field
 
 from ..llm.base import LLMError, Message, Provider
 from ..ontology import Ontology
-from ..ontology.models import Capability, Status
+from ..ontology.models import Capability, Mode, Status
 from .embeddings import CapabilityIndex
 from .lexical import LexicalIndex, cue_modes, is_question
 
 log = logging.getLogger(__name__)
 
-# A vector lead this large over the runner-up means the model adds nothing.
-DECISIVE_MARGIN = 0.08
+# A lead this large over the runner-up means the model adds nothing.
+#
+# Measured, not guessed: of 22 capability misses, 15 had the right answer sitting
+# in the candidate list and 13 of those never reached the model, because a
+# lexical or vector match cleared the old 0.08 margin and the ladder stopped
+# early. Short-circuiting is the expensive mistake here — a wrong answer arrives
+# confidently and fast — so the bar to skip the model is now deliberately high.
+DECISIVE_MARGIN = 0.16
+# The LEXICAL rung is crude: token overlap with no sense of meaning. It may skip
+# the vector rung only on a near-verbatim match, where there is nothing left to
+# disagree about.
+LEXICAL_SHORTCIRCUIT = 0.93
 # Below this, no candidate is worth routing to at all.
 MIN_CONFIDENCE = 0.55
 # A LONE candidate needs a higher bar than a leading one. "What's the weather in
@@ -220,7 +230,21 @@ class IntentRouter:
             lex.append(("explain.metric", strength, "metric-name"))
         ranked = self._rank(lex, screen=screen, roles=roles, permissions=permissions,
                             cues=cues, interrogative=interrogative)
-        if ranked and self._decisive(ranked):
+
+        # Two ways to stop here, and both have to earn it.
+        #
+        # A near-verbatim lexical hit: nothing downstream can improve on it.
+        #
+        # Or an unambiguous NAVIGATION request — the query says "open"/"go to",
+        # the leader is a navigate capability, and it is clear of the field.
+        # That path has a 200 ms p95 budget and an embedding call alone would
+        # blow it, so it keeps the fast exit that everything else gives up.
+        if ranked and ranked[0].score >= LEXICAL_SHORTCIRCUIT:
+            return Route(ranked[0].capability, ranked[0].score, "lexical", ranked,
+                         denied=ranked[0].denied)
+        if (ranked and "navigate" in cues
+                and ranked[0].capability.mode is Mode.NAVIGATE
+                and self._decisive(ranked)):
             return Route(ranked[0].capability, ranked[0].score, "lexical", ranked,
                          denied=ranked[0].denied)
 

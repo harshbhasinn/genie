@@ -66,6 +66,29 @@ async def main() -> int:
         index = CapabilityIndex(utterances, cfg.genie_embed_model)
         await index.build(provider, ROOT / ".cache")
 
+    # A degraded ladder scores lower for reasons that have nothing to do with
+    # the code under test. That has now silently invalidated several rounds of
+    # tuning — twice from a provider spend cap, once from a batch-size 400 — so
+    # it is probed up front and shouted about, rather than left to be inferred
+    # from a disappointing number.
+    degraded = None
+    if provider is not None:
+        if index is None or not index.ready:
+            degraded = "the capability index did not build"
+        elif not await index.search(provider, "wallet balance", limit=1):
+            degraded = "query embedding is failing — spend cap or quota"
+    if degraded:
+        bar = "!" * 64
+        print("")
+        print(RED + bar)
+        print("  LADDER DEGRADED - " + degraded + ".")
+        print("  Vector and model rungs are OFF. These scores are NOT")
+        print("  comparable with a full run, and must not be tuned against.")
+        print(bar + RESET)
+        await provider.close()
+        provider = None
+
+
     router = IntentRouter(ontology, provider, index)
     rungs = "exact + lexical + vector + model" if provider else "exact + lexical"
     print(f"\n{len(queries)} queries · ladder: {rungs}\n")
