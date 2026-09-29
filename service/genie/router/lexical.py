@@ -26,8 +26,43 @@ please can could would should will shall
 show tell give let get
 """.split())
 
-# Words whose presence is a strong signal of intent shape rather than subject.
+# Words that signal the SHAPE of the request rather than its subject. "Plan me a
+# campaign" and "how is my campaign doing" share their only content word and mean
+# entirely different things; nothing in token overlap can tell them apart, because
+# the difference is the verb — and the verb is the part a stop list throws away.
 NAVIGATE_CUES = frozenset("open go take navigate visit jump".split())
+
+PLAN_CUES = frozenset("""
+plan afford buy budget lakh lakhs crore cost costs spend
+""".split())
+
+DEFINITION_CUES = frozenset("""
+mean means meaning explain define definition
+difference differences versus vs between
+""".split())
+
+# Verbs that ask for something to HAPPEN. Every one is a write, and Genie holds
+# no write paths — so these must reach a handoff and its authored refusal, not an
+# explanation of the thing they wanted to do.
+ACTION_CUES = frozenset("""
+pause resume unpause cancel approve reject authorise authorize
+topup recharge upload allocate withdraw resubmit
+""".split())
+
+
+def cue_modes(text: str) -> frozenset[str]:
+    """Which genie_modes the shape of this query points at."""
+    toks = frozenset(tokens(text)) | frozenset(normalise(text).split())
+    out = set()
+    if toks & NAVIGATE_CUES:
+        out.add("navigate")
+    if toks & PLAN_CUES:
+        out.add("plan")
+    if toks & DEFINITION_CUES:
+        out.add("answer:definition")
+    if toks & ACTION_CUES:
+        out.add("handoff")
+    return frozenset(out)
 
 _PUNCT = re.compile(r"[^\w\s]+")
 _SPACE = re.compile(r"\s+")
@@ -67,7 +102,7 @@ class LexicalIndex:
             if toks:
                 self._entries.append((text, cap_id, toks, len(toks)))
 
-    def search(self, query: str, *, limit: int = 8,
+    def search(self, query: str, *, limit: int = 60,
                floor: float = 0.6) -> list[LexicalHit]:
         q_tokens = frozenset(tokens(query))
         if not q_tokens:

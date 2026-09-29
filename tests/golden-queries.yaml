@@ -24,6 +24,12 @@
 #   expect.metrics      metric ids the answer must be built from
 #   expect.refuses      true when Genie must decline and hand off
 #   expect.honest_gap   true when the right answer is "I don't have that"
+#   NOTE 2026-09-29 — a gap-shaped answer routes to the TOPICAL capability, which
+#   reports its own blocked metric. explain.why_unavailable is reserved for the
+#   META question ("why don't you know?"), matching its authored utterances.
+#   Routing every gap through one capability would also throw away the partial
+#   answer, which is usually the useful half.
+#
 #   expect.gap_kind     WHICH kind, because they need different answers:
 #                         unserved     nothing returns it - an API gap
 #                         wrong_grain  it exists at another scope, not this one
@@ -1030,8 +1036,8 @@ queries:
     query: open user management
     context: {screen: command_centre, role: CAMPAIGN_MANAGER}
     expect:
-      capability: explain.why_unavailable
-      mode: answer
+      capability: navigate.team
+      mode: navigate
       follow_up: null
       metrics: []
       honest_gap: true
@@ -1085,7 +1091,7 @@ queries:
     query: how much revenue came from targeted versus broadcasting
     context: {screen: command_centre, role: AD_PARTNER_ADMIN}
     expect:
-      capability: explain.why_unavailable
+      capability: explain.metric
       mode: answer
       follow_up: null
       metrics: [broadcasting_revenue, targeted_revenue]
@@ -1099,7 +1105,7 @@ queries:
     query: what's my fill rate on the auction
     context: {screen: command_centre, role: AD_PARTNER_ADMIN}
     expect:
-      capability: explain.why_unavailable
+      capability: inventory.explain_occupancy
       mode: answer
       follow_up: null
       metrics: [matched_avails, won_and_filled]
@@ -1111,7 +1117,7 @@ queries:
     query: how much unsold inventory am I sitting on
     context: {screen: command_centre, role: AD_PARTNER_ADMIN}
     expect:
-      capability: explain.why_unavailable
+      capability: inventory.explain_occupancy
       mode: answer
       follow_up: null
       metrics: [unsold_matched_opportunity, monthly_spot_inventory_utilised]
@@ -1125,7 +1131,7 @@ queries:
     query: who saw this specific campaign
     context: {screen: campaign_detail, role: AD_PARTNER_ADMIN}
     expect:
-      capability: explain.why_unavailable
+      capability: campaign.explain_audience
       mode: answer
       follow_up: null
       metrics: [campaign_audience_profile, audience_profile]
@@ -1158,7 +1164,7 @@ queries:
     query: how many people are in front of my screens right now
     context: {screen: command_centre, role: AD_PARTNER_ADMIN}
     expect:
-      capability: explain.why_unavailable
+      capability: explain.metric
       mode: answer
       follow_up: null
       metrics: [network_reach]
@@ -1199,7 +1205,7 @@ queries:
     query: what did my competitor spend last month
     context: {screen: command_centre, role: AD_PARTNER_ADMIN}
     expect:
-      capability: explain.why_unavailable
+      capability: wallet.explain_spending
       mode: answer
       follow_up: null
       metrics: []

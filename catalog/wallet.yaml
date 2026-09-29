@@ -157,7 +157,11 @@ capabilities:
           - value: last_month
             label: Last month
             hint: the previous complete month
-        resolved_by_context: [wallet_management, command_centre]
+        # RULING 2026-09-29 - a screen that DISPLAYS the options does not resolve the
+        # ambiguity; only one that NARROWS to a single answer does. Seeing one reach
+        # tile does not tell you the user did not mean a different reach. Cost of
+        # asking: one click. Cost of guessing: a number wrong by multiples.
+        resolved_by_context: [wallet_management]
         default_after_asks: this_month
         max_asks: 1
         status: pending_verification

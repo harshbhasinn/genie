@@ -204,6 +204,7 @@ def _parse_capability(raw: dict, domain: str, where: str) -> Capability:
         execution=execution, gotchas=_tuple(raw.get("gotchas")),
         target_screen=raw.get("target_screen"), refusal=raw.get("refusal"),
         otp_gated=bool(raw.get("otp_gated")), mutating=bool(raw.get("mutating")),
+        blocked_by=_tuple(raw.get("blocked_by")),
     )
 
 

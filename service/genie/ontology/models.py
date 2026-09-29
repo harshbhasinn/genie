@@ -150,6 +150,7 @@ class Capability:
     refusal: str | None = None
     otp_gated: bool = False
     mutating: bool = False
+    blocked_by: tuple[str, ...] = ()
 
     @property
     def writes(self) -> bool:

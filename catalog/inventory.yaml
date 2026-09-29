@@ -108,7 +108,11 @@ capabilities:
         question: "For which dates?"
         default_after_asks: null
         max_asks: 1
-        resolved_by_context: [launch_campaign, inventory_management]
+        # RULING 2026-09-29 - a screen that DISPLAYS the options does not resolve the
+        # ambiguity; only one that NARROWS to a single answer does. Seeing one reach
+        # tile does not tell you the user did not mean a different reach. Cost of
+        # asking: one click. Cost of guessing: a number wrong by multiples.
+        resolved_by_context: [inventory_management]
         status: verified
 
     authorization:
@@ -178,7 +182,6 @@ capabilities:
     mutating: false
     utterances:
       - how full are my screens
-      - what's my utilisation
       - how much inventory is unsold
       - are there empty slots
       - what's my fill rate

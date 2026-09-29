@@ -357,7 +357,11 @@ capabilities:
             hint: every state including completed and cancelled
         default_after_asks: live
         max_asks: 1
-        resolved_by_context: [brand_management, command_centre]
+        # RULING 2026-09-29 - a screen that DISPLAYS the options does not resolve the
+        # ambiguity; only one that NARROWS to a single answer does. Seeing one reach
+        # tile does not tell you the user did not mean a different reach. Cost of
+        # asking: one click. Cost of guessing: a number wrong by multiples.
+        resolved_by_context: [brand_management]
         status: verified
 
     authorization:
@@ -603,7 +607,11 @@ capabilities:
         when: "The user has more than one request in flight and names none of them."
         question: "Which request?"
         options_from: "GET /api/v1/approvals/mine, filtered to requests still awaiting a verdict"
-        resolved_by_context: [notifications_approvals]
+        # RULING 2026-09-29 - a screen that DISPLAYS the options does not resolve the
+        # ambiguity; only one that NARROWS to a single answer does. Seeing one reach
+        # tile does not tell you the user did not mean a different reach. Cost of
+        # asking: one click. Cost of guessing: a number wrong by multiples.
+        resolved_by_context: []
         default_after_asks: null
         max_asks: 1
         status: pending_verification
