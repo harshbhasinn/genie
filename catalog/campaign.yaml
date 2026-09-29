@@ -93,6 +93,10 @@ capabilities:
         question: "Any reach target, or should I maximise it within the budget?"
         default_after_asks: maximise
         max_asks: 1
+        # Its siblings what_budget and how_long already had this and it did not,
+        # so the Launch wizard — which holds every one of those values — was
+        # asked for a reach target it can see.
+        resolved_by_context: [launch_campaign]
         status: verified
 
     authorization:

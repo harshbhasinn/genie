@@ -14,7 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from ..ontology.models import Capability, FollowUp
-from .lexical import tokens
+from .lexical import normalise, tokens
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,6 +35,14 @@ class Ask:
 # Words that say the user is asking ACROSS the entities, not about one of them.
 # "How much has EACH manager spent" and "WHO has budget left" are questions about
 # all of them; answering "which manager?" is answering a question nobody asked.
+# A stated period answers a scope follow-up before it is asked.
+PERIOD_WORDS = frozenset("""
+today yesterday tomorrow week month quarter year
+daily weekly monthly quarterly yearly annual
+jan feb mar apr may jun jul aug sep oct nov dec
+january february march april june july august september october november december
+""".split())
+
 ACROSS_MARKERS = frozenset("""
 each all every both any everyone
 best worst most least top bottom highest lowest
@@ -62,13 +70,41 @@ def _is_relevant(follow_up: FollowUp, cap: Capability, query: str) -> bool:
     explain.metric asked "which utilisation?" for "what's my reach" purely
     because which_utilization is listed first.
     """
+    said = set(tokens(query))
+
     if follow_up.kind == "slot_fill":
         return True
 
-    said = set(tokens(query))
+    if follow_up.kind == "scope":
+        return not (said & PERIOD_WORDS)
 
     if follow_up.kind == "entity_choice":
-        return not (said & ACROSS_MARKERS)
+        if said & ACROSS_MARKERS:
+            return False
+        noun = next((w for w in tokens(follow_up.id.replace("_", " "))
+                     if w not in {"which", "whose", "what"}), None)
+        raw = normalise(query).split()
+        # "I" is capitalised and names nobody. Without this, "how much revenue
+        # did I book this month" looked like it referred to a specific brand.
+        named = any(w[:1].isupper() and w.strip(".,!?'\"").lower() not in ("i", "i'm", "i've")
+                    and len(w.strip(".,!?'\"")) > 1
+                    for w in query.split()[1:])
+
+        # Whether an unnamed entity NEEDS asking depends on what the capability
+        # is going to do with it.
+        #
+        # NAVIGATE, PLAN and PREFILL have to land on exactly one: you cannot
+        # open "the creatives" or price a campaign for no brand. Silence there
+        # means the slot is empty and must be filled.
+        #
+        # ANSWER can legitimately aggregate. "How many impressions did we serve"
+        # spans everything, and asking which campaign answers a question nobody
+        # posed — while "how is my campaign doing" names one and should ask.
+        if cap.mode.value in ("navigate", "plan", "prefill"):
+            return not named
+        if noun and (noun + "s" in raw or noun + "es" in raw):
+            return False          # plural: the question is about all of them
+        return bool(noun and noun in raw) or named
 
     siblings = [f for f in cap.follow_ups if f.kind == "disambiguation"]
     if len(siblings) <= 1:
