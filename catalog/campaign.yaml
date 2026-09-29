@@ -318,11 +318,14 @@ capabilities:
         If fewer than 10 distinct people are in the window the response is suppressed. Render that
         as "too few people to report", NEVER as zero.
 
-    status: blocked
-    blocked_by: [R15]
-    blocked_note: >
-      Age band taxonomy - five bands in the design, four opaque keys from the API. Scope itself is
-      settled (content endpoint, client_id).
+    gotchas:
+      - >
+        R15 RULED - reporting bands are the four opaque keys the API returns (18-25, 26-35, 36-50,
+        51+), rendered exactly as given and never re-bucketed into the wizard's five TARGETING
+        bands. The two are different things and may legitimately differ; say which is being shown.
+
+    status: pending_verification
+    verified_against: "R15 ruling - reporting bands are the API's keys, targeting bands are the wizard's"
 
   - id: campaign.list
     label: List campaigns

@@ -11,8 +11,10 @@ vector rung is for, and pretending otherwise would route confidently on nothing.
 """
 from __future__ import annotations
 
+import math
 import re
 import unicodedata
+from collections import Counter
 from dataclasses import dataclass
 
 # Words that carry no routing signal. Kept short on purpose: an aggressive stop
@@ -78,6 +80,20 @@ def tokens(text: str) -> list[str]:
     return [t for t in normalise(text).split() if t not in STOP]
 
 
+def subject_tokens(text: str) -> list[str]:
+    """Tokens minus navigation verbs, for SCORING.
+
+    "open billing", "go to wallet management" and "take me to credits" all share
+    their verb and nothing else. Keeping it made every navigate capability tie at
+    the same score on any "open X" query, and the tie-break then went to
+    whichever happened to sort first.
+
+    Only navigation verbs are dropped. "plan" stays, because in "plan a new
+    campaign" it is the subject as much as the intent.
+    """
+    return [t for t in tokens(text) if t not in NAVIGATE_CUES]
+
+
 @dataclass(frozen=True, slots=True)
 class LexicalHit:
     capability_id: str
@@ -86,37 +102,59 @@ class LexicalHit:
 
 
 class LexicalIndex:
-    """Token-overlap scoring over authored utterances.
+    """Token-overlap scoring over authored utterances, weighted by rarity.
 
-    Scoring, in plain terms: of the meaningful words in the authored utterance,
-    how many did the user say? Asymmetric on purpose — a user who says more than
-    the utterance ("please just open wallet management for me now") should still
-    match, while a user who says less than half of it should not.
+    Plain coverage — "how many of the utterance's words did the user say?" —
+    breaks once navigation verbs are stripped, because "open the campaign"
+    collapses to the single token {campaign} and then ANY sentence mentioning a
+    campaign matches it perfectly. campaign.open swallowed seven other
+    capabilities that way.
+
+    So each token is weighted by inverse document frequency across the whole
+    utterance set. "campaign" appears in dozens of phrasings and discriminates
+    almost nothing; "utilisation", "approvals" and "daypart" appear in one or two
+    and discriminate almost everything. A word shared with every capability
+    should not be evidence for any of them.
     """
 
     def __init__(self, utterances: dict[str, str]):
-        # utterance text -> capability id
-        self._entries: list[tuple[str, str, frozenset[str], int]] = []
+        self._entries: list[tuple[str, str, frozenset[str], float]] = []
+        prepared = []
+        seen: Counter[str] = Counter()
         for text, cap_id in utterances.items():
-            toks = frozenset(tokens(text))
+            toks = frozenset(subject_tokens(text))
             if toks:
-                self._entries.append((text, cap_id, toks, len(toks)))
+                prepared.append((text, cap_id, toks))
+                seen.update(toks)
+
+        total = max(len(prepared), 1)
+        # +1 inside the log keeps the weight positive for a token that appears
+        # everywhere, rather than zeroing it and making the utterance unmatchable.
+        self._idf = {tok: math.log(1 + total / count) for tok, count in seen.items()}
+
+        for text, cap_id, toks in prepared:
+            weight = sum(self._idf.get(t, 1.0) for t in toks)
+            self._entries.append((text, cap_id, toks, weight))
+
+    def _weight(self, toks) -> float:
+        return sum(self._idf.get(t, 1.0) for t in toks)
 
     def search(self, query: str, *, limit: int = 60,
                floor: float = 0.6) -> list[LexicalHit]:
-        q_tokens = frozenset(tokens(query))
+        q_tokens = frozenset(subject_tokens(query))
         if not q_tokens:
             return []
+        q_weight = self._weight(q_tokens) or 1.0
         hits: list[LexicalHit] = []
-        for text, cap_id, u_tokens, u_len in self._entries:
-            shared = len(q_tokens & u_tokens)
+        for text, cap_id, u_tokens, u_weight in self._entries:
+            shared = q_tokens & u_tokens
             if not shared:
                 continue
-            # Coverage of the UTTERANCE, penalised slightly when the query is
-            # much longer — a long query that happens to contain three common
-            # words is a weaker signal than a short exact-ish one.
-            coverage = shared / u_len
-            noise = shared / len(q_tokens)
+            shared_weight = self._weight(shared)
+            # Coverage of the UTTERANCE by weight, damped slightly when the
+            # query carries a lot the utterance does not account for.
+            coverage = shared_weight / u_weight
+            noise = shared_weight / q_weight
             score = coverage * (0.75 + 0.25 * noise)
             if score >= floor:
                 hits.append(LexicalHit(cap_id, text, round(score, 4)))

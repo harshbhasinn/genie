@@ -14,6 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from ..ontology.models import Capability, FollowUp
+from .lexical import tokens
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,10 +32,60 @@ class Ask:
         }
 
 
+# Words that say the user is asking ACROSS the entities, not about one of them.
+# "How much has EACH manager spent" and "WHO has budget left" are questions about
+# all of them; answering "which manager?" is answering a question nobody asked.
+ACROSS_MARKERS = frozenset("""
+each all every both any everyone
+best worst most least top bottom highest lowest
+which who whose ranked
+""".split())
+
+
+def _is_relevant(follow_up: FollowUp, cap: Capability, query: str) -> bool:
+    """Should this follow-up fire for these words?
+
+    Three kinds, three rules, because they fail differently:
+
+    SLOT_FILL asks for something genuinely missing — a date, a budget. Nothing
+    in the query can make it irrelevant, because its absence is the point.
+
+    ENTITY_CHOICE narrows to one of many. It is irrelevant when the user is
+    asking across all of them: "who has budget left" wants every manager, and
+    "which brand is performing best" wants the ranking, not one brand.
+
+    DISAMBIGUATION resolves one word meaning several things. When a capability
+    has only ONE, it is that capability's ambiguity and fires whenever the
+    capability does — "how much money do I have" never says "wallet" but is
+    exactly the three-balance question. When a capability has SEVERAL, ordering
+    would otherwise decide, so the query must touch the right one's subject:
+    explain.metric asked "which utilisation?" for "what's my reach" purely
+    because which_utilization is listed first.
+    """
+    if follow_up.kind == "slot_fill":
+        return True
+
+    said = set(tokens(query))
+
+    if follow_up.kind == "entity_choice":
+        return not (said & ACROSS_MARKERS)
+
+    siblings = [f for f in cap.follow_ups if f.kind == "disambiguation"]
+    if len(siblings) <= 1:
+        return True
+
+    subject = set(tokens(follow_up.id.replace("_", " ")))
+    for option in follow_up.options:
+        subject |= set(tokens(option.label))
+    subject -= {"which", "whose", "what"}
+    return bool(said & subject) if subject else True
+
+
 def decide(cap: Capability, *, screen: str | None,
+           query: str = "",
            asked: dict[str, int] | None = None,
            already_known: frozenset[str] = frozenset()) -> Ask | None:
-    """The first follow-up that still needs asking, or None.
+    """The first RELEVANT follow-up that still needs asking, or None.
 
     `asked` counts how many times each follow-up has fired this session, so
     max_asks is honoured across turns rather than within one.
@@ -44,6 +95,8 @@ def decide(cap: Capability, *, screen: str | None,
         if follow_up.suppressed_on(screen):
             continue
         if follow_up.id in already_known:
+            continue
+        if query and not _is_relevant(follow_up, cap, query):
             continue
         if asked.get(follow_up.id, 0) >= follow_up.max_asks:
             # Out of asks. The catalog says what to assume instead — and where

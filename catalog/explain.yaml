@@ -44,7 +44,7 @@ capabilities:
         # ambiguity; only one that NARROWS to a single answer does. Seeing one reach
         # tile does not tell you the user did not mean a different reach. Cost of
         # asking: one click. Cost of guessing: a number wrong by multiples.
-        resolved_by_context: [inventory_management]
+        resolved_by_context: [campaign_detail, inventory_management]
         default_after_asks: null
         max_asks: 1
         status: pending_verification

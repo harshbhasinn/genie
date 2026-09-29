@@ -191,7 +191,7 @@ class IntentRouter:
         lex = [(h.capability_id, h.score, "lexical")
                for h in self._lexical.search(text)]
         named, strength = self._names_a_metric(text, screen)
-        if named is not None:
+        if named is not None and not (cues & {"navigate", "handoff", "plan"}):
             lex.append(("explain.metric", strength, "metric-name"))
         ranked = self._rank(lex, screen=screen, roles=roles, permissions=permissions,
                             cues=cues)

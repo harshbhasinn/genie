@@ -125,8 +125,8 @@ class Responder:
         # PRESENT. "What does verified impressions mean" names its metric, so
         # asking "which utilisation did you mean?" is noise — the question
         # belongs to "what's my utilisation", which names nothing.
-        ask = decide_follow_up(cap, screen=ctx.screen, asked=session.asked,
-                               already_known=self._resolved_ambiguities(cap, text, ctx))
+        ask = decide_follow_up(cap, screen=ctx.screen, query=text,
+                               asked=session.asked)
         if ask is not None:
             session.asked[ask.follow_up.id] = session.asked.get(ask.follow_up.id, 0) + 1
             yield Block("follow_up", ask.question, ask.as_block())
@@ -168,39 +168,6 @@ class Responder:
         answer = "".join(collected)
         session.add("model", answer)
         yield Block("text", answer, {"final": True})
-
-    def _resolved_ambiguities(self, cap: Capability, text: str,
-                              ctx: UIContext) -> frozenset[str]:
-        """Follow-ups whose ambiguity is not present in what the user said.
-
-        A follow-up has a SUBJECT — which_utilization is about utilisation,
-        which_wallet about balances. It should fire only when the user's words
-        touch that subject. Without this, narrowing resolved_by_context made
-        explain.metric ask "which utilisation?" for every question on the
-        Command Centre, including "what does verified impressions mean".
-
-        The subject comes from the follow-up's ID and its OPTION LABELS, not
-        from its question. Question text is conversational — "Which one do you
-        mean?" — and matching on it made "what does verified impressions mean"
-        collide with which_attention and which_reach on the word "mean".
-        """
-        said = frozenset(lex_tokens(text))
-        if not said:
-            return frozenset()
-        settled = set()
-        for follow_up in cap.follow_ups:
-            subject = set(lex_tokens(follow_up.id.replace("_", " ")))
-            for option in follow_up.options:
-                subject |= set(lex_tokens(option.label))
-            subject -= {"which", "whose", "what"}
-            # A slot_fill or entity_choice has no options to describe itself
-            # with, so leave those alone — they ask for something missing
-            # rather than disambiguating something said.
-            if not subject or follow_up.kind in ("slot_fill", "entity_choice"):
-                continue
-            if not (said & subject):
-                settled.add(follow_up.id)
-        return frozenset(settled)
 
     # ── facts per mode ─────────────────────────────────────────────────
     def _facts_for(self, cap: Capability, text: str, ctx: UIContext,

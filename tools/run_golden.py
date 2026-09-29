@@ -95,7 +95,7 @@ async def main() -> int:
             want_fu = exp.get("follow_up")
             got_fu = None
             if route.routed:
-                ask = decide(route.capability, screen=ctx.get("screen"))
+                ask = decide(route.capability, screen=ctx.get("screen"), query=q["query"])
                 got_fu = ask.follow_up.id if ask else None
             fu_hit = got_fu == want_fu
             fu_ok += fu_hit
