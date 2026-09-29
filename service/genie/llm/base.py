@@ -54,7 +54,7 @@ class Provider(Protocol):
 
     async def stream(self, messages: Sequence[Message], *,
                      system: str | None = None,
-                     temperature: float = 0.2,
+                     temperature: float = 0.4,
                      max_output_tokens: int = 2048) -> AsyncIterator[str]:
         """Yield text chunks as they arrive."""
         ...

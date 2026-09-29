@@ -14,7 +14,15 @@ from dataclasses import dataclass, field
 
 from ..ontology import Ontology
 from ..ontology.models import Capability, Metric, Screen, Status
+import re
+
 from .lexical import tokens
+
+
+# "R4 - ...", "D10 - ...", "POLICY 2026-09-24 - ...", "CONTRACT v3.1 ..." — notes
+# to ourselves about why a definition says what it says. The reasoning inside is
+# often worth telling a user; the tag never is.
+_INTERNAL_TAG = re.compile(r"^(POLICY \d{4}|CONTRACT v|[RDBCN]\d{1,2}[ .:-])")
 
 
 @dataclass(slots=True)
@@ -87,17 +95,22 @@ def metric_facts(metric: Metric) -> Facts:
         facts.add("unavailable", note or "No endpoint returns this.",
                   metric_id=metric.id, blocked_by=list(metric.blocked_by))
         facts.prose_hint = (
-            "Explain what it means, then say plainly that the FIGURE is not "
-            "available — the definition is known, the data is not served.")
+            "Lead with what it means, in the definition's own words. Then say "
+            "plainly that the FIGURE is not served — the definition is known, "
+            "the data is not. Use the caveats to say what it would and would "
+            "not have counted, and name the nearest thing they CAN see.")
     else:
         facts.prose_hint = (
-            "Explain what it means. You do NOT have the current value, so do "
-            "not state one.")
+            "Lead with what it means, in the definition's own words, then make "
+            "it useful: what it excludes, the mistake people make reading it, "
+            "where on this screen it appears. You do NOT have the current "
+            "value — say so once, briefly, and do not invent one.")
 
     for gotcha in metric.gotchas[:3]:
         text = " ".join(gotcha.split())
-        # Internal provenance tags are for us, not the user.
-        if text.startswith(("POLICY 2026", "R3", "CONTRACT v3.1")):
+        # Strip our own provenance tags. The earlier version listed "R3" as a
+        # literal and so caught exactly one conflict id out of thirty-three.
+        if _INTERNAL_TAG.match(text):
             continue
         facts.add("caveat", text, metric_id=metric.id)
     return facts
@@ -119,7 +132,10 @@ def screen_facts(screen: Screen, ontology: Ontology, role: str | None) -> Facts:
     if actions:
         facts.add("actions", ", ".join(a.label for a in actions),
                   otp_gated=[a.label for a in actions if a.otp_gated])
-    facts.prose_hint = "Describe what this screen is for and what can be done here."
+    facts.prose_hint = (
+        "Say what this screen is for, then what is worth doing on it. Mention "
+        "what is NOT served here if anything, and flag anything needing an OTP "
+        "as theirs to do.")
     return facts
 
 
@@ -160,7 +176,9 @@ def navigate_facts(cap: Capability, ontology: Ontology,
         # Deep-linking into a 403 is worse than saying no. This is the g086 case.
         facts.add("denied", f"{screen.title} is not available to {role}.",
                   screen_id=screen.id, role=role)
-        facts.prose_hint = "Say this screen is not in their navigation, briefly."
+        facts.prose_hint = (
+        "Say this screen is not in their navigation and who does have it. One "
+        "or two sentences — do not offer a link that will refuse them.")
         return facts
 
     facts.add("navigate", screen.route, screen_id=screen.id, title=screen.title,

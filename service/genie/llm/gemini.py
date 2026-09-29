@@ -42,7 +42,7 @@ class GeminiProvider(Provider):
 
     # ── generation ─────────────────────────────────────────────────────
     async def stream(self, messages: Sequence[Message], *,
-                     system: str | None = None, temperature: float = 0.2,
+                     system: str | None = None, temperature: float = 0.4,
                      max_output_tokens: int = 2048) -> AsyncIterator[str]:
         body: dict = {
             "contents": [{"role": m.role, "parts": [{"text": m.text}]} for m in messages],
