@@ -108,6 +108,7 @@ class Responder:
                     {"mode": route.capability.mode.value if route.routed else None,
                      "otp_gated": route.capability.otp_gated if route.routed else False,
                      "match": route.method, "confidence": route.confidence,
+                     "denied": route.denied,
                      "reason": route.reason,
                      "candidates": [c.capability.id for c in route.candidates[:4]]})
 
@@ -117,6 +118,17 @@ class Responder:
             return
 
         cap = route.capability
+
+        # Denied outranks everything else: no follow-up, no facts, no deep link
+        # into a screen that will refuse them.
+        if route.denied:
+            facts = build.denied_facts(cap, ctx.role)
+            for block in facts.blocks:
+                yield Block(block["type"], block["content"], block["meta"])
+            if self._provider is not None:
+                async for block in self._narrate(session, text, ctx, facts):
+                    yield block
+            return
 
         # Follow-up before anything else. Asking beats guessing, and the screen
         # having already answered beats asking.
@@ -151,6 +163,11 @@ class Responder:
                 yield block
             return
 
+        async for block in self._narrate(session, text, ctx, facts):
+            yield block
+
+    async def _narrate(self, session: Session, text: str, ctx: UIContext,
+                       facts: build.Facts) -> AsyncIterator[Block]:
         session.add("user", text)
         collected: list[str] = []
         try:
@@ -164,7 +181,6 @@ class Responder:
             log.warning("llm failed: %s", err)
             yield Block("error", str(err), {"retryable": err.retryable})
             return
-
         answer = "".join(collected)
         session.add("model", answer)
         yield Block("text", answer, {"final": True})

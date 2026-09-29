@@ -22,7 +22,7 @@ from ..llm.base import LLMError, Message, Provider
 from ..ontology import Ontology
 from ..ontology.models import Capability, Status
 from .embeddings import CapabilityIndex
-from .lexical import LexicalIndex, cue_modes
+from .lexical import LexicalIndex, cue_modes, is_question
 
 log = logging.getLogger(__name__)
 
@@ -42,6 +42,16 @@ CONTEXT_BOOST = 0.05
 # screen: someone on Campaign Detail saying "plan me a campaign" wants the
 # planner, not the campaign they are looking at.
 CUE_BOOST = 0.09
+# And a candidate whose mode CONTRADICTS the shape of the request loses this
+# much. Symmetry matters: a scorer that only rewards agreement lets a plausible
+# but wrong-shaped capability win whenever its wording happens to be close.
+CUE_PENALTY = 0.14
+# A capability the role cannot use still RANKS — it just ranks below one the
+# role can. Excluding it outright was the third appearance of one mistake:
+# blocked, then role, then permission, each time turning "you cannot do that"
+# into "I don't understand you", and in the navigate case silently opening a
+# DIFFERENT screen. Saying no is an answer; substituting is not.
+DENIED_PENALTY = 0.20
 
 
 @dataclass(slots=True)
@@ -49,6 +59,7 @@ class Candidate:
     capability: Capability
     score: float
     via: str
+    denied: bool = False
 
     def __repr__(self) -> str:  # pragma: no cover - debugging only
         return f"{self.capability.id}@{self.score:.3f}({self.via})"
@@ -61,6 +72,7 @@ class Route:
     method: str = "none"
     candidates: list[Candidate] = field(default_factory=list)
     reason: str | None = None
+    denied: bool = False
 
     @property
     def routed(self) -> bool:
@@ -78,49 +90,52 @@ class IntentRouter:
         self._lexical = LexicalIndex(utterances)
 
     # ── permission ─────────────────────────────────────────────────────
-    def _allowed(self, cap: Capability, roles: frozenset[str],
-                 permissions: frozenset[str]) -> bool:
-        """UNKNOWN is not DENIED.
+    def _denied_for(self, cap: Capability, roles: frozenset[str],
+                    permissions: frozenset[str]) -> bool:
+        """Can this user actually use it? Ranking, not filtering.
 
-        Until S4 wires /api/v1/me, the caller has no permission set at all. An
-        empty set must mean 'we do not know yet', not 'this user has none' —
-        reading it the second way silently filters out every PERMISSION-gated
-        capability, which is most of them, and the router then answers nothing
-        while looking like it simply failed to match.
-
-        Roles are different: when a role IS claimed, a capability restricted to
-        other roles is genuinely not for this user, and g075 and g086 depend on
-        that being enforced.
+        UNKNOWN is still not DENIED: until S4 wires /api/v1/me there is no
+        permission set at all, and an empty one must mean "not asked yet".
         """
-        # BLOCKED IS NOT UNROUTABLE. A blocked capability is one Genie cannot
-        # fully ANSWER yet — campaign.plan waits on the S5 reach model — but it
-        # is still the right reading of the words. Filtering it out of routing
-        # gives the user "I don't know what you mean" instead of "I understand,
-        # and here is why I can't do it yet", which is strictly less useful and
-        # actively misleading about what the product understands.
-        #
-        # Same principle as the 2026-09-29 ruling on explain.why_unavailable:
-        # the topical capability owns its own gap.
         if roles and cap.authorization.roles:
             if not (set(cap.authorization.roles) & roles):
-                return False
+                return True
         if permissions and cap.authorization.gate == "PERMISSION":
             if cap.authorization.permission:
-                return cap.authorization.permission in permissions
-        return True
+                return cap.authorization.permission not in permissions
+        return False
 
     def _names_a_metric(self, text: str, screen: str | None):
         """Does the query contain a metric's name? Returns (metric, score).
 
-        Uses the same exact-lookup discipline as everything else about metrics —
-        never a vector search, because 'budget utilization' and 'batch
-        utilization' are within noise of each other on any embedding model.
+        Same exact-lookup discipline as everything else about metrics — never a
+        vector search, because "budget utilization" and "batch utilization" sit
+        within noise of each other on any embedding model.
         """
-        from .answers import resolve_metric
-        metric = resolve_metric(text, self._ontology, screen=screen)
+        from .answers import resolve_metric_scored
+        metric, quality = resolve_metric_scored(text, self._ontology, screen=screen)
         if metric is None:
             return None, 0.0
-        return metric, 0.72
+        # Scale with how well the NAME matched. A flat 0.72 meant this signal
+        # fired once in 106 queries and lost the rest by hundredths: "what's my
+        # share of voice" names share_of_voice exactly and still lost to a
+        # topical capability at 0.73.
+        return metric, round(0.55 + 0.40 * quality, 4)
+
+    @staticmethod
+    def _contradicts_shape(cap: Capability, cues: frozenset[str],
+                           interrogative: bool) -> bool:
+        """Is this candidate the wrong SHAPE for what was asked?
+
+        Only navigation is tested, because it is the mode whose utterances sit
+        closest to everything else: "take me to the wallet" embeds near any
+        sentence about wallets, so it wins on similarity while being the wrong
+        kind of answer. A question is not a navigation request, and neither is a
+        sentence whose verb asks for an action or a plan.
+        """
+        if cap.mode.value != "navigate" or "navigate" in cues:
+            return False
+        return interrogative or bool(cues & {"handoff", "plan"})
 
     @staticmethod
     def _matches_cue(cap: Capability, cues: frozenset[str]) -> bool:
@@ -149,7 +164,8 @@ class IntentRouter:
 
     def _rank(self, raw: list[tuple[str, float, str]], *, screen: str | None,
               roles: frozenset[str], permissions: frozenset[str],
-              cues: frozenset[str] = frozenset()) -> list[Candidate]:
+              cues: frozenset[str] = frozenset(),
+              interrogative: bool = False) -> list[Candidate]:
         """Collapse hits to one per capability, filter, boost, sort."""
         best: dict[str, tuple[float, str]] = {}
         for cap_id, score, via in raw:
@@ -159,15 +175,22 @@ class IntentRouter:
         out: list[Candidate] = []
         for cap_id, (score, via) in best.items():
             cap = self._ontology.capability(cap_id)
-            if cap is None or not self._allowed(cap, roles, permissions):
+            if cap is None:
                 continue
+            denied = self._denied_for(cap, roles, permissions)
+            if denied:
+                score -= DENIED_PENALTY
+                via += "-denied"
             if self._contextual(cap, screen):
                 score += CONTEXT_BOOST
                 via += "+context"
             if cues and self._matches_cue(cap, cues):
                 score += CUE_BOOST
                 via += "+cue"
-            out.append(Candidate(cap, round(min(score, 1.0), 4), via))
+            elif self._contradicts_shape(cap, cues, interrogative):
+                score -= CUE_PENALTY
+                via += "-shape"
+            out.append(Candidate(cap, round(min(score, 1.0), 4), via, denied))
         out.sort(key=lambda c: -c.score)
         return out
 
@@ -179,24 +202,27 @@ class IntentRouter:
         # L-1 — exact. Deterministic, and the only rung the golden set can
         # assert on without a network.
         exact = self._ontology.exact_utterance(text)
-        if exact and self._allowed(exact, roles, permissions):
+        if exact is not None:
+            denied = self._denied_for(exact, roles, permissions)
             return Route(exact, 1.0, "exact",
-                         [Candidate(exact, 1.0, "exact")])
+                         [Candidate(exact, 1.0, "exact", denied)], denied=denied)
 
         # L-1.5 — lexical, plus one structural signal: if the words name a
         # metric in the ontology, "what does X mean" is a live reading of them,
         # and explain.metric is the capability that owns definitions. Scored by
         # how well the name matched, so it competes rather than overrides.
         cues = cue_modes(text)
+        interrogative = is_question(text)
         lex = [(h.capability_id, h.score, "lexical")
                for h in self._lexical.search(text)]
         named, strength = self._names_a_metric(text, screen)
         if named is not None and not (cues & {"navigate", "handoff", "plan"}):
             lex.append(("explain.metric", strength, "metric-name"))
         ranked = self._rank(lex, screen=screen, roles=roles, permissions=permissions,
-                            cues=cues)
+                            cues=cues, interrogative=interrogative)
         if ranked and self._decisive(ranked):
-            return Route(ranked[0].capability, ranked[0].score, "lexical", ranked)
+            return Route(ranked[0].capability, ranked[0].score, "lexical", ranked,
+                         denied=ranked[0].denied)
 
         # L-2 — vector. Merged with the lexical hits rather than replacing them:
         # the two disagree in useful ways, and a capability both rungs like is a
@@ -206,24 +232,28 @@ class IntentRouter:
                    for h in await self._index.search(self._provider, text)]
             if vec:
                 ranked = self._rank(lex + vec, screen=screen, roles=roles,
-                                    permissions=permissions, cues=cues)
+                                    permissions=permissions, cues=cues,
+                                    interrogative=interrogative)
 
         if not ranked:
             return Route(reason="nothing matched above the confidence floor")
         if self._decisive(ranked):
             return Route(ranked[0].capability, ranked[0].score,
-                         ranked[0].via.split("+")[0], ranked)
+                         ranked[0].via.split("+")[0].split("-")[0], ranked,
+                         denied=ranked[0].denied)
 
         # L-3 — the model breaks the tie, choosing from a closed list.
         if self._provider is not None:
             chosen = await self._ask_model(text, ranked[:5], screen)
             if chosen is not None:
-                return Route(chosen.capability, chosen.score, "llm", ranked)
+                return Route(chosen.capability, chosen.score, "llm", ranked,
+                                 denied=chosen.denied)
 
         top = ranked[0]
         if top.score >= MIN_CONFIDENCE:
-            return Route(top.capability, top.score, top.via.split("+")[0], ranked,
-                         reason="ambiguous, took the leader")
+            return Route(top.capability, top.score, top.via.split("+")[0].split("-")[0],
+                         ranked, reason="ambiguous, took the leader",
+                         denied=top.denied)
         return Route(candidates=ranked, reason="no candidate cleared the floor")
 
     @staticmethod

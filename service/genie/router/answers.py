@@ -31,6 +31,12 @@ class Facts:
 
 def resolve_metric(text: str, ontology: Ontology, *, screen: str | None,
                    visible: tuple[str, ...] = ()) -> Metric | None:
+    metric, _ = resolve_metric_scored(text, ontology, screen=screen, visible=visible)
+    return metric
+
+
+def resolve_metric_scored(text: str, ontology: Ontology, *, screen: str | None,
+                          visible: tuple[str, ...] = ()) -> tuple[Metric | None, float]:
     """Which metric is the user asking about?
 
     Screen context first, because a metric the user can see is far likelier than
@@ -38,7 +44,7 @@ def resolve_metric(text: str, ontology: Ontology, *, screen: str | None,
     """
     q = frozenset(tokens(text))
     if not q:
-        return None
+        return None, 0.0
 
     def score(metric: Metric) -> float:
         label = frozenset(tokens(metric.label))
@@ -62,9 +68,9 @@ def resolve_metric(text: str, ontology: Ontology, *, screen: str | None,
             # A tie between two metrics in the same pool is a real ambiguity —
             # which_utilization exists for exactly this. Let the follow-up run.
             if len(ranked) > 1 and abs(ranked[0][0] - ranked[1][0]) < 1e-9:
-                return None
-            return ranked[0][1]
-    return None
+                return None, 0.0
+            return ranked[0][1], ranked[0][0]
+    return None, 0.0
 
 
 def metric_facts(metric: Metric) -> Facts:
@@ -159,6 +165,21 @@ def navigate_facts(cap: Capability, ontology: Ontology,
 
     facts.add("navigate", screen.route, screen_id=screen.id, title=screen.title,
               label=cap.label)
+    return facts
+
+
+def denied_facts(cap: Capability, role: str | None) -> Facts:
+    """Understood, and not this user's to do. Say which, not "I don't know"."""
+    facts = Facts()
+    who = f" to {role}" if role else ""
+    facts.add("denied", f"{cap.label} is not available{who}.",
+              capability=cap.id, role=role,
+              roles_allowed=list(cap.authorization.roles),
+              permission=cap.authorization.permission)
+    facts.prose_hint = (
+        "You understood them. Say briefly that this is not theirs to do and who "
+        "can — do not pretend to misunderstand, and do not offer a link into a "
+        "screen that will refuse them.")
     return facts
 
 
