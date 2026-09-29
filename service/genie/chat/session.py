@@ -51,6 +51,12 @@ class Session:
     touched_at: float = field(default_factory=time.time)
     history: list[Message] = field(default_factory=list)
     context: UIContext = field(default_factory=UIContext)
+    # follow-up id -> times asked. max_asks is honoured ACROSS turns, not within
+    # one, or a user gets the same question every time they rephrase.
+    asked: dict[str, int] = field(default_factory=dict)
+    # Permissions from /api/v1/me. Empty until S4 wires the BFF; role alone
+    # gates most things until then.
+    permissions: frozenset[str] = frozenset()
 
     def add(self, role: str, text: str) -> None:
         self.history.append(Message(role=role, text=text))

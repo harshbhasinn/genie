@@ -1,15 +1,16 @@
 """Turning a message into a stream of blocks.
 
-S2's job is the pipe, not the answer. Intent routing is S3 and live data is S4,
-so this does three things and stops:
+S3: route the intent, then answer from the ontology. The shape of a turn:
 
-  1. exact utterance lookup (L-1) — no model, no vectors, proves the ontology is wired
-  2. builds a system prompt from the screen the user is actually on
-  3. streams from the provider, or emits a deterministic stub when none is configured
+    route  →  follow-up?  →  facts from the ontology  →  prose around them
 
-The guardrails in the system prompt are here from the start rather than bolted on
-later, because a model that has been allowed to invent a number once will do it
-again the moment the prompt gets longer.
+Three things never involve the model:
+  · which capability the words mean, when the utterance is authored or lexically clear
+  · whether a follow-up fires (screen context decides)
+  · the text of a definition or a refusal — both are served verbatim
+
+Live data is S4. Until then the service knows what every number MEANS and says
+plainly that it does not have the value.
 """
 from __future__ import annotations
 
@@ -19,7 +20,10 @@ from dataclasses import dataclass
 
 from ..llm.base import LLMError, Message, Provider
 from ..ontology import Ontology
-from ..ontology.models import Status
+from ..ontology.models import Capability, Mode, Status
+from ..router import answers as build
+from ..router.followups import decide as decide_follow_up
+from ..router.intent import IntentRouter, Route
 from .session import Session, UIContext
 
 log = logging.getLogger(__name__)
@@ -42,94 +46,110 @@ ABSOLUTE RULES — these are not style preferences.
    people were seen and the figure is withheld — not that nothing happened.
 5. Impressions are playback events. Reach is people. Footfall is visits. These are
    three different quantities and the product genuinely uses all three.
+6. FACTS below are authoritative and already correct. Use their wording for
+   definitions. Do not restate them in your own words and do not add to them.
 
-Be brief and concrete. Use the user's vocabulary, not the backend's."""
+Be brief and concrete. Two or three sentences unless asked for more."""
 
 
 @dataclass(slots=True)
 class Block:
-    """One renderable unit. The web panel decides how each type looks."""
     type: str
     content: str
     meta: dict | None = None
 
 
 class Responder:
-    def __init__(self, ontology: Ontology, provider: Provider | None):
+    def __init__(self, ontology: Ontology, provider: Provider | None,
+                 router: IntentRouter | None = None):
         self._ontology = ontology
         self._provider = provider
+        self._router = router or IntentRouter(ontology, provider)
 
     @property
     def mode(self) -> str:
         return "llm" if self._provider else "stub"
 
-    # ── context ────────────────────────────────────────────────────────
+    # ── prompt ─────────────────────────────────────────────────────────
     def _screen_brief(self, ctx: UIContext) -> str:
-        """What the user is looking at, as prose the model can use.
-
-        Only servable metrics are described. A blocked metric is listed by name
-        as unavailable, so the model can say 'that is not served' instead of
-        reaching for the nearest number that looks similar.
-        """
         screen = self._ontology.screen(ctx.screen) if ctx.screen else None
         if not screen:
             return "The user's current screen is unknown."
-
         lines = [f'The user is on "{screen.title}" ({screen.route}).',
                  f"Purpose: {screen.purpose}"]
         if ctx.role:
             lines.append(f"Their role is {ctx.role}.")
-
-        servable = [m for m in screen.metrics if m.servable]
-        blocked = [m for m in screen.metrics if m.status is Status.BLOCKED]
-        if servable:
-            lines.append("\nMetrics on this screen (definitions only — you have no values):")
-            for m in servable[:25]:
-                definition = (m.definition or "").strip()
-                lines.append(f"- {m.label}: {definition}" if definition
-                             else f"- {m.label}")
+        blocked = [m.label for m in screen.metrics if m.status is Status.BLOCKED]
         if blocked:
-            names = ", ".join(m.label for m in blocked[:12])
-            lines.append(f"\nNOT SERVED — no endpoint returns these, say so if asked: {names}")
-
-        actions = [a for a in screen.actions if a.status is not Status.BLOCKED]
-        if actions:
-            otp = [a.label for a in actions if a.otp_gated]
-            lines.append("\nActions here: " + ", ".join(a.label for a in actions))
-            if otp:
-                lines.append(f"Needing an OTP, so the user must do them: {', '.join(otp)}")
+            lines.append("NOT SERVED — no endpoint returns these, say so if asked: "
+                         + ", ".join(blocked[:12]))
         return "\n".join(lines)
 
-    def _system_prompt(self, ctx: UIContext) -> str:
-        return f"{GUARDRAILS}\n\n--- CURRENT SCREEN ---\n{self._screen_brief(ctx)}"
+    def _system_prompt(self, ctx: UIContext, facts: build.Facts | None) -> str:
+        parts = [GUARDRAILS, "--- CURRENT SCREEN ---", self._screen_brief(ctx)]
+        if facts and facts.blocks:
+            rendered = "\n".join(
+                f"[{b['type']}] {b['content']}" for b in facts.blocks)
+            parts += ["--- FACTS (authoritative) ---", rendered]
+            if facts.prose_hint:
+                parts += ["--- WHAT TO DO ---", facts.prose_hint]
+        return "\n\n".join(parts)
 
     # ── the turn ───────────────────────────────────────────────────────
     async def respond(self, session: Session, text: str) -> AsyncIterator[Block]:
         ctx = session.context
+        roles = frozenset({ctx.role} if ctx.role else ())
+        permissions = frozenset(session.permissions)
 
-        # L-1: exact utterance. Free, deterministic, and the thing S3 builds on.
-        matched = self._ontology.exact_utterance(text)
-        if matched:
-            yield Block("capability", matched.id, {
-                "mode": matched.mode.value,
-                "otp_gated": matched.otp_gated,
-                "match": "exact-utterance",
-                "follow_ups": [
-                    f.id for f in matched.follow_ups if not f.suppressed_on(ctx.screen)
-                ],
-            })
+        route = await self._router.route(text, screen=ctx.screen, roles=roles,
+                                         permissions=permissions)
+        yield Block("capability", route.capability.id if route.routed else "",
+                    {"mode": route.capability.mode.value if route.routed else None,
+                     "otp_gated": route.capability.otp_gated if route.routed else False,
+                     "match": route.method, "confidence": route.confidence,
+                     "reason": route.reason,
+                     "candidates": [c.capability.id for c in route.candidates[:4]]})
+
+        if not route.routed:
+            async for block in self._unrouted(ctx, text):
+                yield block
+            return
+
+        cap = route.capability
+
+        # Follow-up before anything else. Asking beats guessing, and the screen
+        # having already answered beats asking.
+        ask = decide_follow_up(cap, screen=ctx.screen, asked=session.asked)
+        if ask is not None:
+            session.asked[ask.follow_up.id] = session.asked.get(ask.follow_up.id, 0) + 1
+            yield Block("follow_up", ask.question, ask.as_block())
+            session.add("user", text)
+            session.add("model", ask.question)
+            return
+
+        facts = self._facts_for(cap, text, ctx, roles, permissions)
+
+        # NAVIGATE never calls the model. It has a 200 ms budget and the answer
+        # is a route, not a sentence.
+        if cap.mode is Mode.NAVIGATE:
+            for block in facts.blocks:
+                yield Block(block["type"], block["content"], block["meta"])
+            return
+
+        for block in facts.blocks:
+            yield Block(block["type"], block["content"], block["meta"])
 
         if self._provider is None:
-            async for block in self._stub(ctx, text, matched):
+            async for block in self._stub(ctx, text, cap, facts):
                 yield block
             return
 
         session.add("user", text)
-        history = list(session.history)[-12:]
         collected: list[str] = []
         try:
             async for chunk in self._provider.stream(
-                history, system=self._system_prompt(ctx)
+                list(session.history)[-12:],
+                system=self._system_prompt(ctx, facts),
             ):
                 collected.append(chunk)
                 yield Block("token", chunk)
@@ -142,25 +162,70 @@ class Responder:
         session.add("model", answer)
         yield Block("text", answer, {"final": True})
 
-    async def _stub(self, ctx: UIContext, text: str, matched) -> AsyncIterator[Block]:
-        """Deterministic, and honest about being a stub.
+    # ── facts per mode ─────────────────────────────────────────────────
+    def _facts_for(self, cap: Capability, text: str, ctx: UIContext,
+                   roles: frozenset[str], permissions: frozenset[str]) -> build.Facts:
+        if cap.mode is Mode.NAVIGATE:
+            return build.navigate_facts(cap, self._ontology, ctx.role)
+        if cap.mode is Mode.HANDOFF:
+            return build.handoff_facts(cap)
 
-        Exists so S2's exit gate can be met with no API key, and so the transport
-        can be tested without spending tokens or depending on a third party.
-        """
-        screen = self._ontology.screen(ctx.screen) if ctx.screen else None
-        parts = [f'You said: "{text}".']
-        if screen:
-            parts.append(f'You are on {screen.title} ({screen.route})'
-                         + (f' as {ctx.role}.' if ctx.role else '.'))
-            servable = sum(1 for m in screen.metrics if m.servable)
-            blocked = sum(1 for m in screen.metrics if m.status is Status.BLOCKED)
-            parts.append(f"I know {servable} metric(s) here, and {blocked} that "
-                         f"nothing currently serves.")
-        else:
-            parts.append("No screen context was sent, so I cannot narrow anything.")
-        if matched:
-            parts.append(f'That phrasing maps exactly to "{matched.label}".')
+        if cap.id == "explain.screen" and ctx.screen:
+            screen = self._ontology.screen(ctx.screen)
+            if screen:
+                return build.screen_facts(screen, self._ontology, ctx.role)
+        if cap.id == "explain.capabilities":
+            return build.capability_facts(self._ontology, roles, permissions)
+
+        # explain.metric and anything answering with metrics: resolve WHICH.
+        metric = build.resolve_metric(text, self._ontology, screen=ctx.screen,
+                                      visible=ctx.visible_metrics)
+        if metric is None and cap.answers_with:
+            for mid in cap.answers_with:
+                if (m := self._ontology.metric(mid)) is not None:
+                    metric = m
+                    break
+        if metric is not None:
+            return build.metric_facts(metric)
+
+        facts = build.Facts()
+        facts.prose_hint = ("Answer from what you know about the product. If the "
+                            "specific figure or fact is not in this prompt, say so.")
+        return facts
+
+    # ── fallbacks ──────────────────────────────────────────────────────
+    async def _unrouted(self, ctx: UIContext, text: str) -> AsyncIterator[Block]:
+        """Nothing matched. Say so rather than improvising a capability."""
+        if self._provider is None:
+            msg = ("I could not match that to anything I know how to do. "
+                   "Try asking what a metric on this screen means.")
+            yield Block("token", msg)
+            yield Block("text", msg, {"final": True, "stub": True, "unrouted": True})
+            return
+        facts = build.Facts()
+        facts.prose_hint = (
+            "You could not match this to a known capability. Say briefly that you "
+            "are not sure what they mean, and name two or three things you CAN do "
+            "on this screen. Do not guess.")
+        collected: list[str] = []
+        try:
+            async for chunk in self._provider.stream(
+                [Message(role="user", text=text)],
+                system=self._system_prompt(ctx, facts), max_output_tokens=300,
+            ):
+                collected.append(chunk)
+                yield Block("token", chunk)
+        except LLMError as err:
+            yield Block("error", str(err), {"retryable": err.retryable})
+            return
+        yield Block("text", "".join(collected), {"final": True, "unrouted": True})
+
+    async def _stub(self, ctx: UIContext, text: str, cap: Capability,
+                    facts: build.Facts) -> AsyncIterator[Block]:
+        parts = [f'Matched "{cap.label}" ({cap.mode.value}).']
+        for block in facts.blocks:
+            if block["type"] in ("definition", "refusal", "unavailable"):
+                parts.append(block["content"])
         parts.append("No language model is configured, so this is the stub responder.")
         for part in parts:
             yield Block("token", part + " ")

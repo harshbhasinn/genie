@@ -66,27 +66,82 @@ def test_stream_is_well_formed(client):
     assert evs[-1][1]["latency_ms"] >= 0
 
 
-def test_exact_utterance_surfaces_as_a_capability_block(client):
+def test_exact_utterance_routes_and_asks(client):
+    """g001: three balances exist and the Command Centre names none, so it asks."""
     r = client.post("/v1/genie/chat", json={
         "message": "what is my wallet balance",
         "ui_context": {"screen": "command_centre", "role": "AD_PARTNER_ADMIN"},
     })
-    caps = [d for n, d in events(r) if n == "block" and d["type"] == "capability"]
+    evs = events(r)
+    caps = [d for n, d in evs if n == "block" and d["type"] == "capability"]
     assert len(caps) == 1
     assert caps[0]["content"] == "wallet.explain_balance"
-    assert caps[0]["meta"]["match"] == "exact-utterance"
-    # On the Command Centre the question is genuinely ambiguous, so it must ask.
-    assert "which_wallet" in caps[0]["meta"]["follow_ups"]
+    assert caps[0]["meta"]["match"] == "exact"
+    assert caps[0]["meta"]["confidence"] == 1.0
+
+    asks = [d for n, d in evs if n == "block" and d["type"] == "follow_up"]
+    assert len(asks) == 1
+    assert asks[0]["meta"]["id"] == "which_wallet"
+    # Options carry hints, or the user cannot tell the three apart.
+    assert all(o["hint"] for o in asks[0]["meta"]["options"])
 
 
 def test_same_words_on_the_answering_screen_do_not_ask(client):
-    """g001 vs g002 from the golden set, as a transport test."""
+    """g002: identical words, different screen, and the question must NOT fire.
+
+    The entire argument for embedding rather than a chat window is this pair.
+    """
     r = client.post("/v1/genie/chat", json={
         "message": "what is my wallet balance",
         "ui_context": {"screen": "wallet_management", "role": "AD_PARTNER_ADMIN"},
     })
-    caps = [d for n, d in events(r) if n == "block" and d["type"] == "capability"]
-    assert "which_wallet" not in caps[0]["meta"]["follow_ups"]
+    evs = events(r)
+    caps = [d for n, d in evs if n == "block" and d["type"] == "capability"]
+    assert caps[0]["content"] == "wallet.explain_balance"
+    assert not [d for n, d in evs if n == "block" and d["type"] == "follow_up"]
+
+
+def test_navigation_never_calls_the_model(client):
+    """NAVIGATE has a 200 ms p95 budget. It emits a route, not a sentence."""
+    r = client.post("/v1/genie/chat", json={
+        "message": "take me to the wallet",
+        "ui_context": {"screen": "command_centre", "role": "AD_PARTNER_ADMIN"},
+    })
+    evs = events(r)
+    nav = [d for n, d in evs if n == "block" and d["type"] == "navigate"]
+    assert len(nav) == 1
+    assert nav[0]["content"] == "/wallet"
+    assert nav[0]["meta"]["screen_id"] == "wallet_management"
+    assert not [d for n, d in evs if n == "block" and d["type"] == "token"]
+
+
+def test_otp_refusal_text_is_authored_not_generated(client):
+    """An OTP refusal must read the same every time, so it is served verbatim."""
+    r = client.post("/v1/genie/chat", json={
+        "message": "top up my wallet",
+        "ui_context": {"screen": "wallet_management", "role": "AD_PARTNER_ADMIN"},
+    })
+    evs = events(r)
+    caps = [d for n, d in evs if n == "block" and d["type"] == "capability"]
+    assert caps[0]["meta"]["otp_gated"] is True
+    refusals = [d for n, d in evs if n == "block" and d["type"] == "refusal"]
+    assert len(refusals) == 1
+    assert refusals[0]["meta"]["verbatim"] is True
+    assert "OTP" in refusals[0]["content"]
+
+
+def test_definition_is_served_verbatim(client):
+    """Definitions come from the YAML, never paraphrased, never vector-retrieved."""
+    r = client.post("/v1/genie/chat", json={
+        "message": "what does verified impressions mean",
+        "ui_context": {"screen": "command_centre", "role": "AD_PARTNER_ADMIN"},
+    })
+    evs = events(r)
+    defs = [d for n, d in evs if n == "block" and d["type"] == "definition"]
+    assert defs and defs[0]["meta"]["verbatim"] is True
+    # Blocked metric: the definition is known, the FIGURE is not served.
+    gaps = [d for n, d in evs if n == "block" and d["type"] == "unavailable"]
+    assert gaps and "R7" in gaps[0]["meta"]["blocked_by"]
 
 
 def test_session_is_continuous(client):
@@ -97,11 +152,15 @@ def test_session_is_continuous(client):
     assert events(second)[0][1]["session_id"] == sid
 
 
-def test_missing_context_still_answers(client):
-    r = client.post("/v1/genie/chat", json={"message": "hello"})
-    text = " ".join(d["content"] for n, d in events(r)
-                    if n == "block" and d["type"] == "token")
-    assert "No screen context" in text
+def test_unmatched_query_says_so_rather_than_guessing(client):
+    """Routing to the nearest topical capability on no evidence is the failure
+    mode that loses trust. Saying 'I do not know what you mean' is the answer."""
+    evs = events(client.post("/v1/genie/chat", json={"message": "hello"}))
+    caps = [d for n, d in evs if n == "block" and d["type"] == "capability"]
+    assert caps[0]["content"] == ""
+    assert caps[0]["meta"]["match"] == "none"
+    finals = [d for n, d in evs if n == "block" and d["type"] == "text"]
+    assert finals[0]["meta"]["unrouted"] is True
 
 
 def test_empty_message_is_rejected(client):
@@ -110,6 +169,8 @@ def test_empty_message_is_rejected(client):
 
 def test_stub_says_it_is_a_stub(client):
     """An assistant that quietly degrades is worse than one that says so."""
-    r = client.post("/v1/genie/chat", json={"message": "hello"})
+    r = client.post("/v1/genie/chat", json={
+        "message": "what does verified impressions mean",
+        "ui_context": {"screen": "command_centre", "role": "AD_PARTNER_ADMIN"}})
     finals = [d for n, d in events(r) if n == "block" and d["type"] == "text"]
     assert finals and finals[0]["meta"]["stub"] is True
