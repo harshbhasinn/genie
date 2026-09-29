@@ -68,6 +68,9 @@ capabilities:
       - why was my ad rejected
       - when will my creative be reviewed
       - can I use this creative yet
+      - why was my creative rejected
+      - how many creatives are waiting for review
+      - what's stuck in review
 
     authorization:
       gate: PERMISSION

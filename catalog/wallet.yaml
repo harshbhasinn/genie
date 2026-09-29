@@ -200,6 +200,8 @@ capabilities:
       - who has budget left
       - how much has Akshay spent
       - which manager is running out
+      - can my managers afford this
+      - do my managers have enough budget
     answers_with: [manager_allocated, manager_spent, manager_balance]
 
     follow_ups:

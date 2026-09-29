@@ -27,6 +27,10 @@ capabilities:
       - I want to run a campaign next month
       - what would a 30 day campaign cost
       - help me plan something for Diwali
+      - how much will this cost
+      - will my wallet cover this
+      - can I afford this
+      - am I over-delivering
 
     follow_ups:
       - id: which_brand
@@ -561,6 +565,8 @@ capabilities:
       - return this request for changes
       - this needs changes before I approve it
       - bounce it back with a note
+      - reject this campaign
+      - I don't want to approve this
     refusal: >
       I can't send a request back myself - the reason goes on the record under your name. I'll open
       the approvals queue on that request so you can write it.
