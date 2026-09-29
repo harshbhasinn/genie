@@ -106,7 +106,10 @@ def decide(cap: Capability, *, screen: str | None,
             {"value": o.value, "label": o.label, "hint": o.hint}
             for o in follow_up.options
         )
-        if not options and not follow_up.options_from:
+        # A slot_fill asks for a value the user must supply — dates, a budget —
+        # so having no options is its normal shape, not a defect. Skipping it
+        # meant "can I book 500 screens in Delhi" never asked for the window.
+        if not options and not follow_up.options_from                 and follow_up.kind != "slot_fill":
             continue
         return Ask(follow_up, follow_up.question, options)
     return None

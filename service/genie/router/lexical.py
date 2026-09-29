@@ -48,8 +48,22 @@ difference differences versus vs between
 # explanation of the thing they wanted to do.
 ACTION_CUES = frozenset("""
 pause resume unpause cancel approve reject authorise authorize
-topup recharge upload allocate withdraw resubmit
+top topup recharge upload allocate withdraw resubmit
 """.split())
+
+# Navigation is IMPERATIVE. "Open the approvals queue" is a request to go
+# somewhere; "why can't I launch this campaign" and "who saw this campaign" are
+# questions that merely mention a thing you could navigate to. Without this,
+# campaign.open and navigate.wallet won nine queries on vector similarity alone,
+# because "take me to the wallet" is semantically near anything about wallets.
+INTERROGATIVES = frozenset("""
+why who what how when where which whose
+is are was were do does did can could will would should am
+""".split())
+
+
+def is_question(text: str) -> bool:
+    return bool(frozenset(normalise(text).split()) & INTERROGATIVES)
 
 
 def cue_modes(text: str) -> frozenset[str]:
@@ -76,8 +90,20 @@ def normalise(text: str) -> str:
     return _SPACE.sub(" ", text).strip()
 
 
+def _singular(token: str) -> str:
+    """Crudest possible stemmer, and enough. "how many SCREENS do I have" must
+    reach which_screen_COUNT, and the plural was the only thing in the way."""
+    if len(token) > 3 and token.endswith("ies"):
+        return token[:-3] + "y"
+    if len(token) > 3 and token.endswith("es") and token[-3] in "sxzh":
+        return token[:-2]
+    if len(token) > 3 and token.endswith("s") and not token.endswith("ss"):
+        return token[:-1]
+    return token
+
+
 def tokens(text: str) -> list[str]:
-    return [t for t in normalise(text).split() if t not in STOP]
+    return [_singular(t) for t in normalise(text).split() if t not in STOP]
 
 
 def subject_tokens(text: str) -> list[str]:
