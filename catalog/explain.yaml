@@ -19,6 +19,8 @@ capabilities:
       - explain this metric
       - how is that calculated
       - what is avg dwell
+      - what's my utilisation
+      - what does utilization mean
       - what does verified impressions mean
       - how do you work out blended yield
       - what's the formula for gross profit
@@ -38,7 +40,11 @@ capabilities:
           - value: monthly_spot_inventory_utilised
             label: Inventory utilisation
             hint: how full the ad slots are across the network
-        resolved_by_context: [command_centre, campaign_detail, inventory_management]
+        # RULING 2026-09-29 - a screen that DISPLAYS the options does not resolve the
+        # ambiguity; only one that NARROWS to a single answer does. Seeing one reach
+        # tile does not tell you the user did not mean a different reach. Cost of
+        # asking: one click. Cost of guessing: a number wrong by multiples.
+        resolved_by_context: [inventory_management]
         default_after_asks: null
         max_asks: 1
         status: pending_verification
@@ -54,7 +60,11 @@ capabilities:
           - value: avg_dwell
             label: Avg Dwell
             hint: how long someone stayed in view - seconds
-        resolved_by_context: [command_centre, campaign_detail]
+        # RULING 2026-09-29 - a screen that DISPLAYS the options does not resolve the
+        # ambiguity; only one that NARROWS to a single answer does. Seeing one reach
+        # tile does not tell you the user did not mean a different reach. Cost of
+        # asking: one click. Cost of guessing: a number wrong by multiples.
+        resolved_by_context: [campaign_detail]
         default_after_asks: null
         max_asks: 1
         status: verified
@@ -73,7 +83,11 @@ capabilities:
           - value: monthly_reach
             label: Monthly reach
             hint: a gross 30-day figure that counts repeat visitors more than once
-        resolved_by_context: [command_centre, campaign_detail, inventory_management]
+        # RULING 2026-09-29 - a screen that DISPLAYS the options does not resolve the
+        # ambiguity; only one that NARROWS to a single answer does. Seeing one reach
+        # tile does not tell you the user did not mean a different reach. Cost of
+        # asking: one click. Cost of guessing: a number wrong by multiples.
+        resolved_by_context: [campaign_detail]
         default_after_asks: null
         max_asks: 1
         status: verified

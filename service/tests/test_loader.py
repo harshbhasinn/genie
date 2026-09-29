@@ -21,7 +21,9 @@ def test_loads_the_real_ontology(ontology):
     stats = ontology.stats
     assert stats["screens"] == 12
     assert stats["capabilities"] == 49
-    assert stats["utterances"] == 244
+    # 245 since the 2026-09-29 ruling moved "what's my utilisation" to
+    # explain.metric and added "what does utilization mean" alongside it.
+    assert stats["utterances"] == 245
     assert stats["metrics"] > 90
 
 

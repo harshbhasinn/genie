@@ -162,6 +162,19 @@ def navigate_facts(cap: Capability, ontology: Ontology,
     return facts
 
 
+def blocked_capability_facts(cap: Capability) -> Facts:
+    """Routed correctly, but cannot be completed yet. Say which, and why."""
+    facts = Facts()
+    facts.add("capability_blocked",
+              f"{cap.label} is understood but not available yet.",
+              capability=cap.id, blocked_by=list(cap.blocked_by))
+    facts.prose_hint = (
+        "You understood the request. Say what it WOULD do, then say plainly that "
+        "it is not available yet and why — do not pretend to do it, and do not "
+        "act as though you failed to understand.")
+    return facts
+
+
 def handoff_facts(cap: Capability) -> Facts:
     """OTP-gated and other writes. The refusal text is AUTHORED, not generated,
     so an OTP refusal reads the same every time."""

@@ -78,7 +78,11 @@ capabilities:
           - value: all_time
             label: All time
             hint: everything since the brand was added
-        resolved_by_context: [brand_management]
+        # RULING 2026-09-29 - a screen that DISPLAYS the options does not resolve the
+        # ambiguity; only one that NARROWS to a single answer does. Seeing one reach
+        # tile does not tell you the user did not mean a different reach. Cost of
+        # asking: one click. Cost of guessing: a number wrong by multiples.
+        resolved_by_context: []
         default_after_asks: last_7_days
         max_asks: 1
         status: verified

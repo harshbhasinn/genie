@@ -110,7 +110,7 @@ class CapabilityIndex:
                  *self._matrix.shape)
 
     async def search(self, provider: Provider, query: str, *,
-                     limit: int = 8, floor: float = 0.55) -> list[VectorHit]:
+                     limit: int = 40, floor: float = 0.55) -> list[VectorHit]:
         if self._matrix is None:
             return []
         try:

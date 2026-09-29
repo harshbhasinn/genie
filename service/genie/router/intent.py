@@ -22,7 +22,7 @@ from ..llm.base import LLMError, Message, Provider
 from ..ontology import Ontology
 from ..ontology.models import Capability, Status
 from .embeddings import CapabilityIndex
-from .lexical import LexicalIndex
+from .lexical import LexicalIndex, cue_modes
 
 log = logging.getLogger(__name__)
 
@@ -37,6 +37,11 @@ MIN_CONFIDENCE = 0.55
 LONE_CANDIDATE_FLOOR = 0.78
 # Capabilities whose home screen the user is already on get this much of a nudge.
 CONTEXT_BOOST = 0.05
+# And capabilities whose MODE matches the shape of the request get this much.
+# Larger than the context boost because the verb is a stronger signal than the
+# screen: someone on Campaign Detail saying "plan me a campaign" wants the
+# planner, not the campaign they are looking at.
+CUE_BOOST = 0.09
 
 
 @dataclass(slots=True)
@@ -87,8 +92,15 @@ class IntentRouter:
         other roles is genuinely not for this user, and g075 and g086 depend on
         that being enforced.
         """
-        if cap.status is Status.BLOCKED:
-            return False
+        # BLOCKED IS NOT UNROUTABLE. A blocked capability is one Genie cannot
+        # fully ANSWER yet — campaign.plan waits on the S5 reach model — but it
+        # is still the right reading of the words. Filtering it out of routing
+        # gives the user "I don't know what you mean" instead of "I understand,
+        # and here is why I can't do it yet", which is strictly less useful and
+        # actively misleading about what the product understands.
+        #
+        # Same principle as the 2026-09-29 ruling on explain.why_unavailable:
+        # the topical capability owns its own gap.
         if roles and cap.authorization.roles:
             if not (set(cap.authorization.roles) & roles):
                 return False
@@ -110,6 +122,15 @@ class IntentRouter:
             return None, 0.0
         return metric, 0.72
 
+    @staticmethod
+    def _matches_cue(cap: Capability, cues: frozenset[str]) -> bool:
+        mode = cap.mode.value
+        if mode in cues:
+            return True
+        # A definitional cue points at the capabilities that own meanings, not at
+        # every capability that happens to answer something.
+        return "answer:definition" in cues and cap.id.startswith("explain.")
+
     def _contextual(self, cap: Capability, screen: str | None) -> bool:
         """Is this capability at home on the screen the user is looking at?"""
         if not screen:
@@ -127,7 +148,8 @@ class IntentRouter:
         return False
 
     def _rank(self, raw: list[tuple[str, float, str]], *, screen: str | None,
-              roles: frozenset[str], permissions: frozenset[str]) -> list[Candidate]:
+              roles: frozenset[str], permissions: frozenset[str],
+              cues: frozenset[str] = frozenset()) -> list[Candidate]:
         """Collapse hits to one per capability, filter, boost, sort."""
         best: dict[str, tuple[float, str]] = {}
         for cap_id, score, via in raw:
@@ -142,6 +164,9 @@ class IntentRouter:
             if self._contextual(cap, screen):
                 score += CONTEXT_BOOST
                 via += "+context"
+            if cues and self._matches_cue(cap, cues):
+                score += CUE_BOOST
+                via += "+cue"
             out.append(Candidate(cap, round(min(score, 1.0), 4), via))
         out.sort(key=lambda c: -c.score)
         return out
@@ -162,12 +187,14 @@ class IntentRouter:
         # metric in the ontology, "what does X mean" is a live reading of them,
         # and explain.metric is the capability that owns definitions. Scored by
         # how well the name matched, so it competes rather than overrides.
+        cues = cue_modes(text)
         lex = [(h.capability_id, h.score, "lexical")
                for h in self._lexical.search(text)]
         named, strength = self._names_a_metric(text, screen)
         if named is not None:
             lex.append(("explain.metric", strength, "metric-name"))
-        ranked = self._rank(lex, screen=screen, roles=roles, permissions=permissions)
+        ranked = self._rank(lex, screen=screen, roles=roles, permissions=permissions,
+                            cues=cues)
         if ranked and self._decisive(ranked):
             return Route(ranked[0].capability, ranked[0].score, "lexical", ranked)
 
@@ -179,7 +206,7 @@ class IntentRouter:
                    for h in await self._index.search(self._provider, text)]
             if vec:
                 ranked = self._rank(lex + vec, screen=screen, roles=roles,
-                                    permissions=permissions)
+                                    permissions=permissions, cues=cues)
 
         if not ranked:
             return Route(reason="nothing matched above the confidence floor")
@@ -224,7 +251,9 @@ class IntentRouter:
             async for chunk in self._provider.stream(
                 [Message(role="user", text=prompt)],
                 system="You classify intent. You reply with a single digit and nothing else.",
-                temperature=0.0, max_output_tokens=8,
+                # Not 8: a reasoning model spends its budget before the first
+                # visible character, and this rung answered empty 20/20.
+                temperature=0.0, max_output_tokens=512,
             ):
                 chunks.append(chunk)
         except LLMError as err:
@@ -232,6 +261,9 @@ class IntentRouter:
             return None
 
         answer = "".join(chunks).strip()
+        if not answer:
+            log.warning("disambiguation returned nothing for %r", text[:40])
+            return None
         for token in answer.split():
             cleaned = token.strip(".,:;()[]")
             if cleaned.isdigit():
