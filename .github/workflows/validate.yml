@@ -47,11 +47,20 @@ jobs:
         run: python tools/render_kb.py --check
 
       - name: Nothing credential-shaped got committed
-        # sweep.py's input is a JWT and its output is live tenant data. .gitignore
-        # covers both; this is the backstop for a --force past it.
+        # Two checks, because the first one alone is not enough — it matches on
+        # FILENAMES, and a real Gemini key once reached a commit inside
+        # .env.example, which is tracked on purpose and matches no filename rule.
+        # GitHub push protection caught it; this job had not. Content is what counts.
         run: |
-          if git ls-files | grep -Ei '\.(jwt|token)$|^\.env$|sweep-results.*\.json$'; then
+          set -e
+          if git ls-files | grep -Ei '\.(jwt|token|pem)$|^\.env$|sweep-results.*\.json$'; then
             echo "::error::A credential or live-data file is tracked. See CONTRIBUTING.md §8."
+            exit 1
+          fi
+          # Key SHAPES, in the content of every tracked text file. .env.example is
+          # meant to carry variable NAMES with empty values — never a value.
+          if git grep -nIE '(AIza[0-9A-Za-z_-]{30,}|AQ\.[0-9A-Za-z_-]{30,}|eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY-----)' -- . ':(exclude).github/workflows/*'; then
+            echo "::error::Something key-shaped is committed. Scrub it from history and ROTATE it — a pushed secret is a leaked secret."
             exit 1
           fi
           echo "clean"
