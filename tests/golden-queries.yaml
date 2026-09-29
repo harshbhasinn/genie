@@ -24,6 +24,11 @@
 #   expect.metrics      metric ids the answer must be built from
 #   expect.refuses      true when Genie must decline and hand off
 #   expect.honest_gap   true when the right answer is "I don't have that"
+#   NOTE 2026-09-29b — explain.metric explains what a metric MEANS; it does not
+#   serve values. A question asking for a NUMBER ("how many impressions did we
+#   serve") belongs to the capability that owns that data, which then reports the
+#   figure or its own gap. Nine expectations were re-pointed on that basis.
+#
 #   NOTE 2026-09-29 — a gap-shaped answer routes to the TOPICAL capability, which
 #   reports its own blocked metric. explain.why_unavailable is reserved for the
 #   META question ("why don't you know?"), matching its authored utterances.
@@ -173,7 +178,7 @@ queries:
     query: how many impressions did we serve
     context: {screen: command_centre, role: AD_PARTNER_ADMIN}
     expect:
-      capability: explain.metric
+      capability: campaign.explain_performance
       mode: answer
       follow_up: null
       metrics: [impressions_delivered]
@@ -379,7 +384,7 @@ queries:
     query: how many people saw my ads last month
     context: {screen: command_centre, role: AD_PARTNER_ADMIN}
     expect:
-      capability: explain.metric
+      capability: campaign.explain_performance
       mode: answer
       follow_up: null
       metrics: [monthly_reach]
@@ -817,8 +822,8 @@ queries:
     query: am I over-delivering on reach
     context: {screen: adguide_panel, role: AD_PARTNER_ADMIN}
     expect:
-      capability: campaign.plan
-      mode: plan
+      capability: campaign.explain_pacing
+      mode: answer
       follow_up: null
       metrics: [plan_headroom, plan_reach_vs_target]
       honest_gap: true
@@ -1050,9 +1055,9 @@ queries:
     query: show me Coca-Cola
     context: {screen: command_centre, role: AD_PARTNER_ADMIN}
     expect:
-      capability: navigate.brands
-      mode: navigate
-      follow_up: which_brand_to_open
+      capability: brand.explain_performance
+      mode: answer
+      follow_up: which_brand_perf
       metrics: []
     why: >
       A brand name with no verb. Ambiguous between opening the brand and reporting on
@@ -1091,7 +1096,7 @@ queries:
     query: how much revenue came from targeted versus broadcasting
     context: {screen: command_centre, role: AD_PARTNER_ADMIN}
     expect:
-      capability: explain.metric
+      capability: explain.difference
       mode: answer
       follow_up: null
       metrics: [broadcasting_revenue, targeted_revenue]
@@ -1146,7 +1151,7 @@ queries:
     query: show me the age breakdown
     context: {screen: command_centre, role: AD_PARTNER_ADMIN}
     expect:
-      capability: explain.metric
+      capability: campaign.explain_audience
       mode: answer
       follow_up: null
       metrics: [audience_profile]
@@ -1164,7 +1169,7 @@ queries:
     query: how many people are in front of my screens right now
     context: {screen: command_centre, role: AD_PARTNER_ADMIN}
     expect:
-      capability: explain.metric
+      capability: inventory.explain_screens
       mode: answer
       follow_up: null
       metrics: [network_reach]
@@ -1178,7 +1183,7 @@ queries:
     query: why is this city showing zero
     context: {screen: command_centre, role: AD_PARTNER_ADMIN}
     expect:
-      capability: explain.why_unavailable
+      capability: inventory.explain_distribution
       mode: answer
       follow_up: null
       metrics: [audience_profile]
@@ -1205,7 +1210,7 @@ queries:
     query: what did my competitor spend last month
     context: {screen: command_centre, role: AD_PARTNER_ADMIN}
     expect:
-      capability: wallet.explain_spending
+      capability: brand.explain_performance
       mode: answer
       follow_up: null
       metrics: []

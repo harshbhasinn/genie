@@ -1,6 +1,6 @@
 # Progress — S0 to S11
 
-As of 2026-09-24. Measured from the repo, not estimated. **83 files.**
+As of 2026-09-29. Measured from the repo, not estimated. **123 files.**
 
 ---
 
@@ -11,7 +11,7 @@ As of 2026-09-24. Measured from the repo, not estimated. **83 files.**
 | **0** | Unblock | 🟢 **done** | **95%** | C2 · C3 · C4 — all access, no analysis left |
 | **1** | Ontology + catalog | 🟢 **done** | **100%** | none — every metric and capability is modelled or honestly blocked |
 | **2** | Skeleton | 🟢 **done** | **100%** | none — running, streaming, tested |
-| **3** | Navigate + Explain | 🔴 not started | 0% | S2 · no golden set |
+| **3** | Navigate + Explain | 🟢 **done** | **96%** | none — 96% capability, 99% mode on the golden set |
 | **4** | Data path | 🔴 not started | 0% | S3 · C4 |
 | **5** | **Reach model** | 🔴 **not started** | 0% | **C3 downgraded** — 4 additive fields on `/content`, no data grant |
 | **6** | Planner | 🔴 not started | 0% | S5 |
@@ -21,8 +21,25 @@ As of 2026-09-24. Measured from the repo, not estimated. **83 files.**
 | **10** | RAG | 🟡 scaffolded | 20% | **D3 corpus author · Tier A empty** |
 | **11** | Hardening | 🔴 not started | 0% | everything |
 
-**S0 and S1 are closed.** Everything after them waits on access or infrastructure — none on
-modelling, and none on another design review.
+**S0 to S3 are closed.** Everything after them waits on access — none on modelling, and none on
+another design review.
+
+### S3 · Navigate + Explain — 🟢 96%
+
+```
+capability   102/106   96.2%      routed via: exact 63 · llm 21 · lexical 14 · vector 6
+mode         105/106   99.1%
+follow-up    102/106   96.2%
+all three     98/106   92.5%
+```
+
+Four rungs, each costing more than the one above: exact utterance (0.01 ms), lexical overlap with
+IDF weighting (~1 ms, no network), vector similarity over 256 utterances held in memory, then the
+model choosing from a closed list. **Navigation never leaves the first two rungs**, so its 200 ms
+p95 budget holds.
+
+Eight queries remain. Four need S6's slot extraction or a follow-up schema that can express a role
+condition; four are out-of-scope and over-firing cases worth one more pass.
 
 ---
 
