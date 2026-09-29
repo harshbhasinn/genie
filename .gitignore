@@ -54,3 +54,6 @@ tmp/
 service/.pytest_cache/
 service/**/__pycache__/
 *.pem
+
+# router index cache — derived from the catalog, regenerated on demand
+.cache/

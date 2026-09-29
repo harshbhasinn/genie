@@ -81,11 +81,23 @@ class GeminiProvider(Provider):
             raise LLMError(f"cannot reach Gemini: {err}", retryable=True) from err
 
     # ── embeddings ─────────────────────────────────────────────────────
+    # Hard server limit. Exceeding it returns 400, not a truncated result, so it
+    # fails loudly — but only if the caller chunks. 244 utterances is 3 calls.
+    MAX_BATCH = 100
+
     async def embed(self, texts: Sequence[str]) -> list[list[float]]:
         if not self._embed_model:
             raise LLMError("GENIE_EMBED_MODEL is empty — run tools/list_models.py")
         if not texts:
             return []
+        out: list[list[float]] = []
+        for start in range(0, len(texts), self.MAX_BATCH):
+            out.extend(await self._embed_batch(texts[start:start + self.MAX_BATCH]))
+        if len(out) != len(texts):
+            raise LLMError(f"embed returned {len(out)} vectors for {len(texts)} inputs")
+        return out
+
+    async def _embed_batch(self, texts: Sequence[str]) -> list[list[float]]:
         body = {"requests": [
             {"model": f"models/{self._embed_model}",
              "content": {"parts": [{"text": t}]}} for t in texts]}
@@ -98,10 +110,7 @@ class GeminiProvider(Provider):
             raise LLMError(_explain(resp.status_code, resp.text),
                            status=resp.status_code,
                            retryable=resp.status_code in (429, 500, 503))
-        out = [e.get("values") or [] for e in resp.json().get("embeddings", [])]
-        if len(out) != len(texts):
-            raise LLMError(f"embed returned {len(out)} vectors for {len(texts)} inputs")
-        return out
+        return [e.get("values") or [] for e in resp.json().get("embeddings", [])]
 
     async def close(self) -> None:
         await self._client.aclose()
@@ -123,7 +132,7 @@ def _explain(status: int, raw: str) -> str:
     except (json.JSONDecodeError, AttributeError):
         detail = raw[:200]
     hint = {
-        400: " — check GENIE_LLM_MODEL against tools/list_models.py",
+        400: " — malformed request; check batch size and model id",
         401: " — GEMINI_API_KEY is wrong",
         403: " — key restricted, or the Generative Language API is off for that project",
         404: " — that model id does not exist for this key; run tools/list_models.py",
