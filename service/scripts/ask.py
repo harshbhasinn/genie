@@ -71,6 +71,19 @@ def turn(client: httpx.Client, base: str, message: str, *, screen: str | None,
                               f"{DIM}({meta.get('mode')}){RESET}{otp}")
                         if meta.get("follow_ups"):
                             print(f"{DIM}  will ask: {', '.join(meta['follow_ups'])}{RESET}")
+                    elif kind == "follow_up":
+                        # Was silently dropped: the turn showed "2 blocks" and no
+                        # visible answer, because the one thing it produced was
+                        # the question nobody rendered.
+                        print(f"{YELLOW}? {data['content']}{RESET}")
+                        for opt in (data.get("meta") or {}).get("options") or []:
+                            hint = f"  {DIM}— {opt['hint']}{RESET}" if opt.get("hint") else ""
+                            print(f"    · {BOLD}{opt['label']}{RESET}{hint}")
+                    elif kind in ("definition", "formula", "caveat", "unavailable",
+                                  "refusal", "denied", "navigate", "capability_blocked",
+                                  "screen", "actions", "metric_list", "unavailable_list",
+                                  "can", "navigate_offer"):
+                        print(f"{DIM}[{kind}]{RESET} {data['content'][:160]}")
                     elif kind == "error":
                         print(f"\n{RED}error{RESET} {data['content']}")
                     elif kind == "text":
