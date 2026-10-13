@@ -56,7 +56,7 @@ kb/
   inbox/           where authored policy documents will land (empty; see D3)
 reference/
   bff-openapi.json the live QA BFF spec — 236 paths, 261 operations, 620 schemas
-tools/             7 scripts, all stdlib + pyyaml + jsonschema
+tools/             8 scripts, all stdlib + pyyaml + jsonschema
 asks/              what we need from other teams, ready to send
 ```
 
@@ -106,6 +106,7 @@ All five must pass. CI runs exactly these on every push and pull request.
 | `verify_sources.py` | **Statically** checks each metric's declared field against the OpenAPI response schema. Found 11 metrics pointing at an endpoint that returns four fields. `--write` regenerates `VERIFY.md` |
 | `render_kb.py` | Renders `kb/generated/` from the ontology. `--check` is the staleness gate |
 | `sweep.py` | **Needs a live token.** Calls every mapped endpoint and reports what actually came back, including a cross-tenant negative pass. Stdlib only, so it runs on a locked-down QA box |
+| `sync_kb.py` | **Needs chotu_rag running.** Pushes `kb/generated/` into the `genie` knowledge base on the chotu_rag service, creating it if missing. Dry run by default, `--apply` to write. Replaces only docs whose `source_digest` changed, and never touches documents added through the admin UI |
 | `inspect_openapi.py` | Ad-hoc exploration of the vendored spec |
 
 ---
