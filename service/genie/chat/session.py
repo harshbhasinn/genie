@@ -57,6 +57,13 @@ class Session:
     # Permissions from /api/v1/me. Empty until S4 wires the BFF; role alone
     # gates most things until then.
     permissions: frozenset[str] = frozenset()
+    # Who the token says this is (genie.auth.identity.Identity), and whose token
+    # it was read from, so a different user in the same session is re-read.
+    identity: object | None = None
+    identity_subject: str | None = None
+    # The follow-up asked last turn, so "Main wallet" is taken as the answer to
+    # "Which balance?" rather than routed from scratch.
+    pending: dict | None = None
 
     def add(self, role: str, text: str) -> None:
         self.history.append(Message(role=role, text=text))

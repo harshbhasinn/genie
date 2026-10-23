@@ -65,6 +65,12 @@ class Ontology:
     def screens_for(self, role: str) -> list[Screen]:
         return [s for s in self.screens.values() if s.visible_to(role)]
 
+    @property
+    def permission_names(self) -> frozenset[str]:
+        """Every permission the catalog gates on — the vocabulary /me grants are checked against."""
+        return frozenset(c.authorization.permission for c in self.capabilities.values()
+                         if c.authorization.permission)
+
     # ── stats, for /healthz ─────────────────────────────────────────────
     @property
     def stats(self) -> dict[str, int]:

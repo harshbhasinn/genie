@@ -26,6 +26,13 @@ capabilities:
       - what's in the wallet
       - do I have enough funds
       - how much can I still spend
+      # The AdGuide opener's chip (Home.docx), verbatim, so the chip routes exactly.
+      # Without these, "explain my wallet position" shared only the word "wallet"
+      # with navigate.wallet and opened the Wallet page instead of explaining it.
+      - explain my wallet position
+      - where do we stand on money
+      - give me a wallet summary
+      - wallet overview
     answers_with: [main_wallet_balance, sub_wallet_total, total_credits_owned]
 
     follow_ups:
@@ -52,10 +59,15 @@ capabilities:
         status: verified
 
     authorization:
-      gate: PERMISSION
-      permission: VIEW_WALLET
+      # Live QA, 2026-10-23, read as a CAMPAIGN_MANAGER: members/{me}/wallet/summary
+      # answers 200 (they hold VIEW_MEMBER_WALLET); wallet/balance, wallet/kpis and
+      # members/wallet-overview answer 403. So "my balance" is theirs to ask - it is
+      # their OWN sub-wallet - and the agency pots stay the BFF's to refuse. Gating
+      # on VIEW_WALLET refused the manager's own money; the API is the truth.
+      gate: ROLE
+      roles: [AD_PARTNER_ADMIN, CAMPAIGN_MANAGER]
       scope: client must be in accessible_client_ids
-      verified_against: "CAMPAIGN_CREATION_GUIDE.md 2.3 - CAMPAIGN_MANAGER has no wallet permission"
+      verified_against: "live QA BFF 2026-10-23 - CM 200 on members/{userId}/wallet/summary, 403 on wallet/balance, wallet/kpis, members/wallet-overview"
 
     gotchas:
       - >

@@ -49,6 +49,16 @@ best worst most least top bottom highest lowest
 which who whose ranked
 """.split())
 
+# Words asking for the WHOLE picture. "Explain my wallet position" wants every
+# balance, so "which balance do you mean?" answers a question nobody asked.
+OVERVIEW_WORDS = frozenset(tokens(
+    "position overview summary stand standing snapshot breakdown overall everything picture"))
+
+# Only where the answer really does show every option at once. The wallet's live
+# answer carries all three balances on one card; "campaign summary" still has to
+# ask which campaigns, so this must not reach campaign.list or explain.metric.
+OVERVIEW_ANSWERS = frozenset({"wallet.explain_balance"})
+
 
 def _is_relevant(follow_up: FollowUp, cap: Capability, query: str) -> bool:
     """Should this follow-up fire for these words?
@@ -105,6 +115,11 @@ def _is_relevant(follow_up: FollowUp, cap: Capability, query: str) -> bool:
         if noun and (noun + "s" in raw or noun + "es" in raw):
             return False          # plural: the question is about all of them
         return bool(noun and noun in raw) or named
+
+    # A disambiguation splits one word into several meanings; a request for the
+    # overview wants all of them, so there is nothing to choose between.
+    if cap.id in OVERVIEW_ANSWERS and said & OVERVIEW_WORDS:
+        return False
 
     siblings = [f for f in cap.follow_ups if f.kind == "disambiguation"]
     if len(siblings) <= 1:
