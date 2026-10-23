@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from genie.auth.tokens import NoToken
 from genie.chat.responder import Responder
 from genie.chat.session import MemorySessionStore
 from genie.main import app
@@ -22,11 +23,14 @@ REPO = Path(__file__).resolve().parents[2]
 
 @pytest.fixture(scope="module")
 def client():
-    """Force the stub by passing provider=None, whatever .env says."""
+    """Force the stub by passing provider=None, whatever .env says — and no token or
+    BFF, so a developer's real QA token in secrets/ is never used by a test."""
     ontology = load(REPO)
     with TestClient(app) as c:
         app.state.ontology = ontology
         app.state.provider = None
+        app.state.tokens = NoToken()
+        app.state.bff = None
         app.state.sessions = MemorySessionStore()
         app.state.responder = Responder(ontology, None)
         yield c

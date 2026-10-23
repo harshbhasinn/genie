@@ -57,3 +57,16 @@ service/**/__pycache__/
 
 # router index cache — derived from the catalog, regenerated on demand
 .cache/
+
+# ─── Local development only. Never in git, never in QA or prod. ──────────────
+#
+# secrets/ holds a developer's own QA login (bff.jwt, bff-refresh.token, and the
+# .tmp.jwt files written while renewing). The *.jwt / *.token lines above already
+# catch those; the whole folder is ignored too, so nothing dropped in there by
+# hand can ever be committed.
+secrets/
+# The OTP login helper for local testing. It handles a developer's mobile, OTP and
+# tokens, and QA/prod never use it — there the dashboard forwards the user's token.
+service/scripts/dev_login.py
+# Query vectors cached by retrieval experiments - derived, re-fetched on a miss.
+.eval-cache/

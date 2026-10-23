@@ -18,13 +18,18 @@ import logging
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 
+from ..bff import BffClient
+from ..data.money import unexplained_numbers
+from ..data.wallet import agency_wallet, my_subwallet
 from ..llm.base import LLMError, Message, Provider
 from ..ontology import Ontology
 from ..ontology.models import Capability, Mode, Status
 from ..router import answers as build
 from ..router.followups import decide as decide_follow_up
 from ..router.intent import IntentRouter, Route
+from ..router.lexical import normalise
 from ..router.lexical import tokens as lex_tokens
+from ..router.live_answers import WALLET_CAPS, is_overview, wallet_answer
 from .session import Session, UIContext
 
 log = logging.getLogger(__name__)
@@ -82,10 +87,11 @@ class Block:
 
 class Responder:
     def __init__(self, ontology: Ontology, provider: Provider | None,
-                 router: IntentRouter | None = None):
+                 router: IntentRouter | None = None, bff: BffClient | None = None):
         self._ontology = ontology
         self._provider = provider
         self._router = router or IntentRouter(ontology, provider)
+        self._bff = bff
 
     @property
     def mode(self) -> str:
@@ -117,10 +123,40 @@ class Responder:
         return "\n\n".join(parts)
 
     # ── the turn ───────────────────────────────────────────────────────
-    async def respond(self, session: Session, text: str) -> AsyncIterator[Block]:
+    def _answers_pending(self, session: Session, text: str) -> tuple[Capability, str] | None:
+        """Is this message the answer to the question asked last turn?
+
+        "Main wallet" after "Which balance do you mean?" picks that option. Matched
+        on the option's label or value; anything else is a new question and the
+        pending one is dropped.
+        """
+        pending, session.pending = session.pending, None
+        if not pending:
+            return None
+        said = normalise(text)
+        for value, label in pending["options"]:
+            if normalise(label) in said or normalise(value.replace("_", " ")) in said:
+                cap = self._ontology.capability(pending["capability"])
+                return (cap, value) if cap else None
+        return None
+
+    async def respond(self, session: Session, text: str,
+                      token: str | None = None) -> AsyncIterator[Block]:
         ctx = session.context
         roles = frozenset({ctx.role} if ctx.role else ())
         permissions = frozenset(session.permissions)
+
+        # Session first: an answer to last turn's question is not a new question.
+        answered = self._answers_pending(session, text)
+        if answered:
+            cap, chosen = answered
+            yield Block("capability", cap.id, {"mode": cap.mode.value, "match": "follow_up",
+                                               "confidence": 1.0, "chosen": chosen})
+            if cap.id in WALLET_CAPS:
+                async for block in self._live_wallet(session, text, cap, token, chosen):
+                    yield block
+                return
+            text = f"{text} ({cap.label})"   # otherwise fall through with the choice in view
 
         route = await self._router.route(text, screen=ctx.screen, roles=roles,
                                          permissions=permissions)
@@ -157,13 +193,24 @@ class Responder:
         # PRESENT. "What does verified impressions mean" names its metric, so
         # asking "which utilisation did you mean?" is noise — the question
         # belongs to "what's my utilisation", which names nothing.
-        ask = decide_follow_up(cap, screen=ctx.screen, query=text,
-                               asked=session.asked)
+        # A campaign manager's wallet is their own sub-wallet: "which balance?" would
+        # offer three agency pots the BFF refuses them (live QA: 403 on all three).
+        own_wallet_only = cap.id in WALLET_CAPS and ctx.role == "CAMPAIGN_MANAGER"
+        ask = None if own_wallet_only else decide_follow_up(cap, screen=ctx.screen, query=text,
+                                                            asked=session.asked)
         if ask is not None:
             session.asked[ask.follow_up.id] = session.asked.get(ask.follow_up.id, 0) + 1
+            session.pending = {"capability": cap.id, "follow_up": ask.follow_up.id,
+                               "options": [(o["value"], o["label"]) for o in ask.options]}
             yield Block("follow_up", ask.question, ask.as_block())
             session.add("user", text)
             session.add("model", ask.question)
+            return
+
+        # Live figures, read as the user. Wallet first; S4 adds the rest the same way.
+        if cap.id in WALLET_CAPS:
+            async for block in self._live_wallet(session, text, cap, token, None):
+                yield block
             return
 
         facts = self._facts_for(cap, text, ctx, roles, permissions)
@@ -185,6 +232,77 @@ class Responder:
 
         async for block in self._narrate(session, text, ctx, facts):
             yield block
+
+    # ── live answers ───────────────────────────────────────────────────
+    async def _live_wallet(self, session: Session, text: str, cap: Capability,
+                           token: str | None, chosen: str | None) -> AsyncIterator[Block]:
+        """The wallet, read now as this user: a card built by code, then words.
+
+        The words are the template unless a model is configured, and a model's
+        words are kept only if every number in them is on the card.
+        """
+        identity = session.identity
+        if self._bff is None or not token or identity is None:
+            # No live access (not signed in, or the BFF is not configured). Say so
+            # once, then answer what the numbers MEAN — which is still useful.
+            notice = ("I can't read live figures right now — you're not signed in to the "
+                      "dashboard API.")
+            yield Block("unavailable", notice, {"reason": "signed_out"})
+            facts = self._facts_for(cap, text, session.context, frozenset(), frozenset())
+            for block in facts.blocks:
+                yield Block(block["type"], block["content"], block["meta"])
+            if self._provider is not None:
+                async for block in self._narrate(session, text, session.context, facts):
+                    yield block
+                return
+            # No model: still end with a real answer — the notice plus what it means.
+            meaning = next((b["content"] for b in facts.blocks if b["type"] == "definition"), "")
+            final = f"{notice} {meaning}".strip()
+            yield Block("token", final)
+            yield Block("text", final, {"final": True, "live": False, "narrated_by": "template"})
+            return
+
+        grant = identity.grant_for(session.context.client_id)
+        if grant is None:
+            yield Block("denied", "You don't have access to that agency's wallet.",
+                        {"reason": "no_grant"})
+            return
+        # A campaign manager's "my balance" is their own sub-wallet (catalog gotcha).
+        own = grant.role == "CAMPAIGN_MANAGER"
+        if own:
+            view = await my_subwallet(self._bff, token, grant.client_id, identity.user_id)
+        else:
+            view = await agency_wallet(
+                self._bff, token, grant.client_id,
+                with_managers=cap.id != "wallet.explain_runway" or is_overview(text))
+        answer = wallet_answer(cap.id, text, view, self._ontology, chosen=chosen,
+                               own_subwallet=own)
+        yield Block("metrics", answer.card["title"], answer.card)
+
+        final, by, rejected = answer.template, "template", []
+        if self._provider is not None and answer.card["items"]:
+            # Buffered, not streamed: the number check has to run before the user
+            # reads a word, and a card is already on screen while this happens.
+            draft: list[str] = []
+            try:
+                async for chunk in self._provider.stream(
+                        [Message(role="user", text=text)],
+                        system=self._system_prompt(session.context, answer.facts),
+                        temperature=0.2, max_output_tokens=400):
+                    draft.append(chunk)
+            except LLMError as err:
+                log.warning("live narration failed, using template: %s", err)
+            written = "".join(draft).strip()
+            rejected = unexplained_numbers(written, answer.allowed + [text]) if written else []
+            if written and not rejected:
+                final, by = written, "model"
+            elif rejected:
+                log.warning("narration invented %s; using the template", rejected)
+        session.add("user", text)
+        session.add("model", final)
+        yield Block("token", final)
+        yield Block("text", final, {"final": True, "live": True, "narrated_by": by,
+                                    "rejected_numbers": rejected or None})
 
     async def _narrate(self, session: Session, text: str, ctx: UIContext,
                        facts: build.Facts) -> AsyncIterator[Block]:

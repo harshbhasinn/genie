@@ -1,0 +1,29 @@
+# What goes into the Genie image for QA and prod: ONLY what the service runs on.
+#
+# Allowlist, not denylist: everything is excluded, then the runtime is let back in.
+# A new dev script, test, notebook or secret added anywhere tomorrow stays out of
+# the image without anyone remembering to list it here.
+#
+# The service needs:
+#   service/genie/           the code
+#   service/requirements.txt its dependencies
+#   ontology/, catalog/      read at startup (genie_ontology_root) and validated
+#
+# Deliberately left out: service/scripts/ (ask.py, dev_login.py), service/tests/,
+# tools/, tests/, kb/, reference/, asks/, docs, .env, secrets/, .cache/.
+
+*
+
+!service/genie/
+!service/requirements.txt
+!ontology/
+!catalog/
+
+# Never, even inside an allowed folder.
+**/__pycache__/
+**/*.py[cod]
+**/.pytest_cache/
+**/*.jwt
+**/*.token
+**/.env
+**/.env.*

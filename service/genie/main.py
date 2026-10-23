@@ -18,6 +18,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .auth import tokens as token_auth
+from .bff import BffClient
 from .chat.responder import Responder
 from .chat.router import router as chat_router
 from .chat.session import MemorySessionStore
@@ -56,20 +57,32 @@ async def lifespan(app: FastAPI):
         log.warning("no LLM configured — stub responder. Set GEMINI_API_KEY and "
                     "GENIE_LLM_MODEL (see tools/list_models.py)")
 
+    # The read path. Config has already refused any host that is not QA.
+    bff = (BffClient(cfg.bff_base, portal_id=cfg.genie_bff_portal_id,
+                     timeout=cfg.genie_bff_timeout_s)
+           if cfg.genie_bff_mode == "token" else None)
+    if bff is not None and not cfg.genie_bff_portal_id:
+        log.warning("GENIE_BFF_PORTAL_ID is empty — every BFF call will be refused "
+                    "with PORTAL_ID_REQUIRED")
+
     app.state.settings = cfg
     app.state.ontology = ontology
     app.state.provider = provider
     app.state.tokens = token_auth.build(cfg)
+    app.state.bff = bff
     app.state.sessions = MemorySessionStore()
-    app.state.responder = Responder(ontology, provider)
+    app.state.responder = Responder(ontology, provider, bff=bff)
 
-    log.info("ready on http://%s:%s | responder=%s",
-             cfg.genie_host, cfg.genie_port, app.state.responder.mode)
+    log.info("ready on http://%s:%s | responder=%s | bff=%s",
+             cfg.genie_host, cfg.genie_port, app.state.responder.mode,
+             bff.base if bff else "off")
     try:
         yield
     finally:
         if provider is not None:
             await provider.close()
+        if bff is not None:
+            await bff.close()
         log.info("stopped")
 
 
@@ -108,8 +121,16 @@ async def healthz() -> dict:
             token_state["hint"] = "token expired — replace secrets/bff.jwt"
         elif (info.expires_in or 0) < 60:
             token_state["hint"] = "token expires in under a minute"
+    elif cfg.genie_bff_mode == "token" and cfg.genie_env != "local":
+        token_state["hint"] = "tokens are forwarded by the dashboard on each request"
     elif cfg.genie_bff_mode == "token":
         token_state["hint"] = f"no token at {cfg.genie_bff_token_file}"
+    tokens = app.state.tokens
+    if getattr(tokens, "can_refresh", False):
+        token_state["can_refresh"] = True
+    if getattr(tokens, "last_refresh_error", None):
+        token_state["refresh_error"] = tokens.last_refresh_error
+    token_state["portal_id_set"] = bool(cfg.genie_bff_portal_id)
 
     return {
         "status": "ok",

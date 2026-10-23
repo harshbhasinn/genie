@@ -23,12 +23,17 @@ class GeminiProvider(Provider):
     name = "gemini"
 
     def __init__(self, api_key: str, model: str, embed_model: str,
-                 timeout: float = 60.0):
+                 timeout: float = 60.0, thinking_budget: int | None = None):
         if not api_key:
             raise LLMError("GEMINI_API_KEY is empty")
         if not model:
             raise LLMError("GENIE_LLM_MODEL is empty — run tools/list_models.py")
         self._model = model
+        # Genie's model jobs are choosing from a list and wording given facts, so
+        # hidden reasoning buys nothing and costs seconds: measured on
+        # gemini-3.8-flash, ~3.9 s with default thinking vs ~2.6 s with budget 0.
+        # None sends no thinking setting at all (for models that reject one).
+        self._thinking_budget = thinking_budget
         self._embed_model = embed_model
         self._last_usage = Usage()
         self._client = httpx.AsyncClient(
@@ -51,6 +56,8 @@ class GeminiProvider(Provider):
         }
         if system:
             body["systemInstruction"] = {"parts": [{"text": system}]}
+        if self._thinking_budget is not None:
+            body["generationConfig"]["thinkingConfig"] = {"thinkingBudget": self._thinking_budget}
 
         url = f"/models/{self._model}:streamGenerateContent?alt=sse"
         self._last_usage = Usage()
