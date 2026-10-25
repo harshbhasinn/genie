@@ -2,13 +2,13 @@ screen:
   id: inventory_management
   kind: screen
   title: Screen Management
-  route: /inventory
+  route: /inventory-management
   nav_label: Inventory Management
   audience: [AD_PARTNER_ADMIN, CAMPAIGN_MANAGER]
   source_frame: "Agency Admin Dashboard (1.5).docx - Inventory Management (image6)"
   variants: [broadcasting]
   purpose: >
-    The screens this agency can buy on - how many, where, what kind of shop they sit in, how full
+    The screens you can buy on - how many, where, what kind of shop they sit in, how full
     they already are, and what they cost. This is the pool the Planner allocates from.
   entities: [device, store, batch, contract]
   related_screens: [command_centre, launch_campaign]

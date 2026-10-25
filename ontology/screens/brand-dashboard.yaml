@@ -2,13 +2,12 @@ screen:
   id: brand_dashboard
   kind: screen
   title: Brand Dashboard
-  route: /brands/{brandId}/dashboard
+  route: /brand-management/{brandId}
   nav_label: Brand Dashboard
   audience: [CAMPAIGN_MANAGER, BRAND_MANAGER]
   source_frame: "Agency Admin Dashboard (1.5).docx - Campaign Manager section, Brand Dashboard (image15)"
   purpose: >
-    A per-brand view that appears only in the Campaign Manager's navigation. Not present in the
-    Agency Admin set.
+    A per-brand view that appears only in the Campaign Manager's navigation. Not present in the Media Partner Admin set.
   entities: [brand, campaign]
   related_screens: [brand_management, campaign_detail]
 

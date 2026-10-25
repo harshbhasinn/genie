@@ -2,7 +2,7 @@ screen:
   id: creative_library
   kind: screen
   title: Creative Library
-  route: /brands/{brandId}/creatives
+  route: /brand-management/library/{brandId}
   audience: [AD_PARTNER_ADMIN, CAMPAIGN_MANAGER]
   source_frame: "Agency Admin Dashboard (1.5).docx - Creative Library (image4)"
   purpose: >
@@ -60,9 +60,10 @@ screen:
       definition: Creatives cleared for use on a campaign.
       unit: count
       freshness: live
-      gotchas:
+      user_notes:
         - >
           A campaign goes LIVE only when every creative on it is approved, so this count is a launch blocker and not a vanity figure.
+      gotchas:
         - >
           aiReasonCode and aiMessage on a rejected row say why the checker refused it - read them back rather than saying 'rejected'.
         - >
@@ -81,9 +82,10 @@ screen:
       definition: Creatives a person still has to decide on.
       unit: count
       freshness: live
-      gotchas:
+      user_notes:
         - >
           A campaign goes LIVE only when every creative on it is approved, so this count is a launch blocker and not a vanity figure.
+      gotchas:
         - >
           aiReasonCode and aiMessage on a rejected row say why the checker refused it - read them back rather than saying 'rejected'.
         - >
@@ -101,9 +103,10 @@ screen:
       label: Rejected
       unit: count
       freshness: live
-      gotchas:
+      user_notes:
         - >
           A campaign goes LIVE only when every creative on it is approved, so this count is a launch blocker and not a vanity figure.
+      gotchas:
         - >
           aiReasonCode and aiMessage on a rejected row say why the checker refused it - read them back rather than saying 'rejected'.
       status: pending_verification
@@ -118,10 +121,10 @@ screen:
       definition: Split of the library between still images and video.
       unit: count
       freshness: live
-      gotchas:
+      status: pending_verification
+      user_notes:
         - >
           Image and video price differently and occupy different slot ladders, so the split is a commercial fact and not a file-type curiosity.
-      status: pending_verification
 
   actions:
 

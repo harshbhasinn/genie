@@ -23,7 +23,8 @@ class GeminiProvider(Provider):
     name = "gemini"
 
     def __init__(self, api_key: str, model: str, embed_model: str,
-                 timeout: float = 60.0, thinking_budget: int | None = None):
+                 timeout: float = 60.0, thinking_budget: int | None = None,
+                 thinking_level: str | None = None):
         if not api_key:
             raise LLMError("GEMINI_API_KEY is empty")
         if not model:
@@ -33,7 +34,10 @@ class GeminiProvider(Provider):
         # hidden reasoning buys nothing and costs seconds: measured on
         # gemini-3.8-flash, ~3.9 s with default thinking vs ~2.6 s with budget 0.
         # None sends no thinking setting at all (for models that reject one).
+        # Gemini 3.5 models take a LEVEL instead and cannot turn thinking off -
+        # "minimal" is their floor. A level, when set, wins over a budget.
         self._thinking_budget = thinking_budget
+        self._thinking_level = thinking_level
         self._embed_model = embed_model
         self._last_usage = Usage()
         self._client = httpx.AsyncClient(
@@ -56,7 +60,9 @@ class GeminiProvider(Provider):
         }
         if system:
             body["systemInstruction"] = {"parts": [{"text": system}]}
-        if self._thinking_budget is not None:
+        if self._thinking_level:
+            body["generationConfig"]["thinkingConfig"] = {"thinkingLevel": self._thinking_level}
+        elif self._thinking_budget is not None:
             body["generationConfig"]["thinkingConfig"] = {"thinkingBudget": self._thinking_budget}
 
         url = f"/models/{self._model}:streamGenerateContent?alt=sse"
@@ -83,7 +89,8 @@ class GeminiProvider(Provider):
                     if meta := chunk.get("usageMetadata"):
                         self._last_usage = Usage(
                             prompt_tokens=meta.get("promptTokenCount", 0),
-                            output_tokens=meta.get("candidatesTokenCount", 0))
+                            output_tokens=meta.get("candidatesTokenCount", 0),
+                            thinking_tokens=meta.get("thoughtsTokenCount", 0))
         except httpx.RequestError as err:
             raise LLMError(f"cannot reach Gemini: {err}", retryable=True) from err
 
@@ -127,6 +134,8 @@ def _texts(chunk: dict) -> list[str]:
     out = []
     for cand in chunk.get("candidates") or []:
         for part in (cand.get("content") or {}).get("parts") or []:
+            if part.get("thought"):
+                continue                     # reasoning, never shown to the user
             if text := part.get("text"):
                 out.append(text)
     return out

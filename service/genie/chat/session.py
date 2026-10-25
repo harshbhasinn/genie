@@ -31,6 +31,7 @@ class UIContext:
     client_id: str | None = None
     visible_metrics: tuple[str, ...] = ()
     selected_entity: str | None = None
+    brand_id: str | None = None          # the brand whose pages the user is in, if any
 
     @classmethod
     def parse(cls, raw: dict | None) -> "UIContext":
@@ -41,6 +42,7 @@ class UIContext:
             client_id=raw.get("client_id"),
             visible_metrics=tuple(str(m) for m in metrics),
             selected_entity=raw.get("selected_entity"),
+            brand_id=raw.get("brand_id"),
         )
 
 
@@ -54,8 +56,8 @@ class Session:
     # follow-up id -> times asked. max_asks is honoured ACROSS turns, not within
     # one, or a user gets the same question every time they rephrase.
     asked: dict[str, int] = field(default_factory=dict)
-    # Permissions from /api/v1/me. Empty until S4 wires the BFF; role alone
-    # gates most things until then.
+    # The grant's permissions from /api/v1/me (chat/router.py), when their vocabulary
+    # matches the catalog's; empty otherwise, and then role alone gates.
     permissions: frozenset[str] = frozenset()
     # Who the token says this is (genie.auth.identity.Identity), and whose token
     # it was read from, so a different user in the same session is re-read.
@@ -64,6 +66,14 @@ class Session:
     # The follow-up asked last turn, so "Main wallet" is taken as the answer to
     # "Which balance?" rather than routed from scratch.
     pending: dict | None = None
+    # Names of the user's own things that live answers have shown (a campaign, a
+    # brand), name -> kind, so a name is routed as a name and not as its words.
+    entities: dict[str, str] = field(default_factory=dict)
+
+    def remember(self, kind: str, names) -> None:
+        for name in names:
+            if name and len(name.strip()) >= 3:
+                self.entities[name.strip()] = kind
 
     def add(self, role: str, text: str) -> None:
         self.history.append(Message(role=role, text=text))

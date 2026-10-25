@@ -14,7 +14,7 @@ capabilities:
 
   - id: wallet.explain_balance
     label: Wallet balance
-    description: How much credit the agency holds, and in which pot.
+    description: How much credit you hold, and in which pot.
     genie_mode: answer
     mutating: false
     otp_gated: false
@@ -49,7 +49,7 @@ capabilities:
             hint: available to allocate - what campaigns actually draw from
           - value: sub_wallet_total
             label: Team sub-wallets
-            hint: already handed to campaign managers, not spendable by the agency
+            hint: already handed to campaign managers, so not yours to spend
           - value: total_credits_owned
             label: Total credits
             hint: main wallet plus all sub-wallets added together
@@ -109,11 +109,11 @@ capabilities:
       - id: whose_runway
         kind: disambiguation
         when: "The viewer has a sub-wallet of their own, so 'my runway' is ambiguous."
-        question: "Whose runway - the agency's, or your own sub-wallet?"
+        question: "Whose runway - the main wallet's, or your own sub-wallet's?"
         options:
           - value: agency
-            label: Agency wallet
-            hint: what the whole agency has left
+            label: Main wallet
+            hint: what the main wallet has left
           - value: self
             label: My sub-wallet
             hint: what you personally can still spend on campaigns
@@ -142,15 +142,23 @@ capabilities:
 
   - id: wallet.explain_spending
     label: Where the money went
-    description: Spend broken down by brand, and the recent transaction history.
+    description: Spend broken down by brand, month by month, and the recent transaction history.
     genie_mode: answer
     mutating: false
+    target_screen: wallet_management
     utterances:
       - where is my money going
       - which brand is spending the most
       - show me recent transactions
       - what did we spend this month
       - break down my spending
+      - where did my money go
+      - how much did we spend
+      - what did we spend
+      - how much have we spent
+      - spending by brand
+      - show the wallet transactions
+      - latest transactions
     answers_with: [month_consumption]
 
     follow_ups:
@@ -184,7 +192,7 @@ capabilities:
 
     gotchas:
       - >
-        Pick by question: 'what did we spend this month' is consumption/monthly, 'which brand spends most' is revenue-breakdown brands[], 'show me transactions' is this one.
+        Pick by question: 'what did we spend this month' is consumption/monthly, 'which brand spends most' is wallet/spending-analysis brands[], 'show me transactions' is the ledger.
       - >
         Every debit carries 18% GST on the AdGrid-to-AP leg, so a ledger line will not match a campaign's quoted cost. Say so rather than letting the user find the gap.
       - >
@@ -196,10 +204,14 @@ capabilities:
     execution:
       state_changing: false
       method: GET
-      path: "/api/v1/clients/{clientId}/wallet/transactions"
+      path: "/api/v1/clients/{clientId}/wallet/statement"
       layer: bff
       note: >
-        The ledger. /wallet/statement is the same money as a statement, /wallet/consumption/monthly the month rollup, and GET /api/v1/revenue-breakdown/{apId} gives the brand split.
+        The ledger is read from /wallet/statement, whose line is typed. /wallet/transactions is the
+        screen's own source, but its row type in the spec is the shared "Row" (16 responses use the
+        name), so its fields are undocumented. Brand split: /wallet/spending-analysis. Month rollup:
+        /wallet/consumption/monthly. A named period is sent; otherwise the backend's default window
+        is echoed.
 
   - id: wallet.explain_manager_wallets
     label: Campaign manager sub-wallets
@@ -255,9 +267,48 @@ capabilities:
       note: >
         MemberWalletOverviewResponse across the team. GET /api/v1/clients/{clientId}/members/{userId}/wallet/summary is one manager.
 
+  - id: wallet.explain_invoices
+    label: Invoices and what is owed
+    description: What AdGrid has billed you - outstanding amounts, the current invoice, one month's bill and whether it was paid.
+    genie_mode: answer
+    mutating: false
+    target_screen: wallet_management
+    utterances:
+      - do I have any unpaid invoices
+      - what do I owe
+      - how much do we owe AdGrid
+      - how much is outstanding
+      - what is my current invoice
+      - was last month's invoice paid
+      - show my invoices
+      - when is my payment due
+      - what is my bill for September
+      - what is outstanding on my bill
+      - is my invoice paid
+    authorization:
+      gate: PERMISSION
+      permission: VIEW_WALLET
+      roles: [AD_PARTNER_ADMIN]
+      scope: "The agency's own settlements only."
+    gotchas:
+      - >
+        This is the AdGrid-to-agency bill (the Command Centre's Platform Invoice): revenue share and
+        screen rental, with GST. Totals and charge-type totals only - the per-contract charge lines
+        are never read.
+      - >
+        The AdOps console notes that /wallet/settlements/summary is "gated behind a feature flag".
+        When it is refused, the last three months' settlements answer instead.
+    execution:
+      state_changing: false
+      method: GET
+      path: "/api/v1/clients/{clientId}/wallet/settlements/summary"
+      layer: bff
+      note: "One named month: GET /api/v1/clients/{clientId}/wallet/settlements?months=YYYY-MM."
+    status: pending_verification
+
   - id: wallet.request_funds
     label: Request funds from AdGrid
-    description: Ask AdGrid to top up the agency wallet.
+    description: Ask AdGrid to top up your main wallet.
     genie_mode: handoff
     mutating: true
     otp_gated: true
@@ -298,7 +349,7 @@ capabilities:
 
   - id: wallet.allocate_to_subwallet
     label: Allocate funds to a campaign manager
-    description: Move credit from the agency wallet into a manager's sub-wallet.
+    description: Move credit from the main wallet into a manager's sub-wallet.
     genie_mode: handoff
     mutating: true
     otp_gated: true

@@ -237,9 +237,9 @@ capabilities:
 
     gotchas:
       - >
-        This endpoint does NOT return impressions, reach or spend-to-date. Delivery for an agency comes from POST /api/v1/dashboard/content at client scope, over the campaign's own dates - and even then it cannot be narrowed to one campaign unless the creative filter isolates it.
+        API 2026-10-23 - per-campaign delivery IS served: GET /api/v1/campaign-analytics/{campaignId}/impressions, /reach and /spend (the AdOps dashboard's campaign-oversight page on QA calls /reach and /spend). State, dates, cost and screens/stores/cities come from GET /api/v1/campaigns. By the contract, only impressions are MEASURED - reach (totalDeliverableReach) and spend (spendForRange) are the plan and the cost schedule, so Genie says "booked to reach" and "cost", never "reached" or "spent". Not served: delivery against plan, so percent delivered stays an honest gap.
       - >
-        So the honest answer to 'how is my campaign doing' today is budget, screen count and state, plus a clear statement that per-campaign delivery is not served yet.
+        "Which campaign?" is asked with the user's own campaigns as options, so Genie asks it, not the catalog. Order: last turn's choice, the campaign on screen, a campaign named in the message, the only running one - otherwise ask.
       - "Always echo the resolved window - a misread surfaces immediately rather than three turns later."
       - >
         Impressions are playback events; reach is people. Never present one as the other.
@@ -249,10 +249,10 @@ capabilities:
     execution:
       state_changing: false
       method: GET
-      path: "/api/v1/campaign-oversight/campaigns/{campaignId}/metrics"
+      path: "/api/v1/campaign-analytics/{campaignId}/impressions"
       layer: bff
       note: >
-        CampaignMetricsResponse returns campaignId, status, budget and totalScreens - configuration, not delivery.
+        Read in parallel with /reach and /spend, after GET /api/v1/campaigns picks the campaign. No date range is sent; the backend's window is echoed from each response's from/to.
 
   - id: campaign.explain_pacing
     label: Whether a campaign is on track
@@ -274,10 +274,13 @@ capabilities:
 
     execution:
       method: GET
-      path: "/api/v1/campaign-oversight/campaigns/{campaignId}/metrics"
+      path: "/api/v1/campaign-analytics/{campaignId}/impressions"
       layer: bff
       state_changing: false
-      note: "Read the campaign pacing mode before judging - Accelerated front-loads by design."
+      note: >
+        With /reach and /spend, as for performance; time elapsed is computed from the flight dates.
+        campaign-oversight/* is the AdOps console's API, not the agency's. No endpoint returns planned
+        impressions, so delivery against plan is not answered.
 
     gotchas:
       - >
@@ -297,6 +300,9 @@ capabilities:
     mutating: false
     utterances:
       - who saw my ad
+      - who saw the campaign
+      - who saw this campaign
+      - who watched my campaign
       - what's the audience for this campaign
       - show me the demographics
       - what age group did I reach
@@ -309,11 +315,14 @@ capabilities:
       scope: client_id grain - the agency's own creatives, wherever they played
 
     execution:
-      method: POST
-      path: "/api/v1/dashboard/content"
+      method: GET
+      path: "/api/v1/campaign-analytics/{campaignId}/impressions/gender"
       layer: bff
       state_changing: false
-      note: "A POST that changes nothing. Demographics NOT yet on ContentWindowResponse - see R7."
+      note: >
+        API 2026-10-23 - per-campaign GENDER split of impressions (genders[].label, sharePct).
+        Age is not served per campaign; the agency-wide GET /api/v1/analytics/{clientId}/audience-age
+        answers the wider question and must be labelled as such. No dashboard on QA calls it yet.
 
     gotchas:
       - >
@@ -328,16 +337,76 @@ capabilities:
 
     gotchas:
       - >
-        R15 RULED - reporting bands are the four opaque keys the API returns (18-25, 26-35, 36-50,
-        51+), rendered exactly as given and never re-bucketed into the wizard's five TARGETING
-        bands. The two are different things and may legitimately differ; say which is being shown.
+        R15 RULED - reporting bands are the opaque keys the API returns - the AgeGroup set since
+        2026-10-21: 18-24, 25-34, 35-44, 45-54, 55-64 and 65+ - rendered exactly as given and never re-bucketed into the wizard's
+        TARGETING bands. The two are different things and may legitimately differ; say which is
+        being shown.
 
     status: pending_verification
     verified_against: "R15 ruling - reporting bands are the API's keys, targeting bands are the wizard's"
 
+  - id: campaign.explain_breakdown
+    label: Where a campaign played
+    description: A campaign's impressions split by city or by store type, most first.
+    genie_mode: answer
+    mutating: false
+    target_screen: campaign_detail
+    utterances:
+      - which city is my campaign doing best in
+      - show impressions by city
+      - break down my campaign by city
+      - where did my campaign play the most
+      - which store type performs best
+      - impressions by store type
+      - which cities are doing best for this campaign
+      - performance by city
+      - city wise performance
+      - which store types work best
+      - how is my campaign doing in each city
+    authorization:
+      gate: PERMISSION
+      permission: VIEW_CAMPAIGN
+    gotchas:
+      - >
+        groupBy is CITY, CATEGORY (store type) or DAYPART (the analytics service on QA); the dashboard
+        sends CITY. Rows carry spend and reach too, but those are the plan, so only impressions and
+        screens are read.
+    execution:
+      state_changing: false
+      method: GET
+      path: "/api/v1/campaign-analytics/{campaignId}/performance-breakdown"
+      layer: bff
+    status: pending_verification
+
+  - id: campaign.explain_daypart
+    label: When a campaign played
+    description: A campaign's impressions by time of day, with each daypart's busiest hour.
+    genie_mode: answer
+    mutating: false
+    target_screen: campaign_detail
+    utterances:
+      - what time of day does my ad play most
+      - when did my campaign get the most impressions
+      - which daypart got the most impressions
+      - show impressions by time of day
+      - what is the busiest hour for my campaign
+      - does my campaign do better in the morning or evening
+      - impressions by daypart
+      - what time does my campaign play
+    authorization:
+      gate: PERMISSION
+      permission: VIEW_CAMPAIGN
+    execution:
+      state_changing: false
+      method: GET
+      path: "/api/v1/campaign-analytics/{campaignId}/impressions/daypart"
+      layer: bff
+      note: "dayparts[] with hours[]; outsideDaypartImpressions counts plays outside every daypart."
+    status: pending_verification
+
   - id: campaign.list
     label: List campaigns
-    description: Campaigns for a brand or across the agency, with their states.
+    description: Campaigns for one brand or all of them, with their states.
     genie_mode: answer
     mutating: false
     utterances:
@@ -413,6 +482,7 @@ capabilities:
     target_screen: campaign_detail
     utterances:
       - pause this campaign
+      - pause my campaign
       - stop the campaign for now
       - put it on hold
       - halt delivery
@@ -452,6 +522,7 @@ capabilities:
     target_screen: campaign_detail
     utterances:
       - resume the campaign
+      - resume my campaign
       - start it again
       - un-pause this
       - put it back live
@@ -481,6 +552,7 @@ capabilities:
     target_screen: campaign_detail
     utterances:
       - cancel this campaign
+      - cancel my campaign
       - stop it permanently
       - kill the campaign
       - end it early
@@ -521,6 +593,8 @@ capabilities:
     target_screen: notifications_approvals
     utterances:
       - approve this campaign
+      - approve the pending campaign
+      - approve my campaigns
       - authorise the pending campaigns
       - sign off on these requests
       - clear the approval queue
@@ -572,8 +646,9 @@ capabilities:
       - reject this campaign
       - I don't want to approve this
     refusal: >
-      I can't send a request back myself - the reason goes on the record under your name. I'll open
-      the approvals queue on that request so you can write it.
+      Sending a request back for changes isn't in the dashboard yet, so the approvals queue offers
+      approve and reject - and rejecting ends the request for good. I'll open the queue so you can
+      decide.
 
     authorization:
       gate: ROLE
@@ -597,8 +672,16 @@ capabilities:
         Genie's useful contribution here is the reason. It can draft what is wrong with the request -
         budget over the manager's sub-wallet, creatives not approved, flight dates already closed -
         and let the checker edit and send.
+      - >
+        The agency console's approvals inbox has send-back commented out (GENIE1.md §8.8,
+        2026-10-25): the API has it, the screen does not. Until it is back, the refusal says so and
+        names what the screen does offer.
 
-    status: pending_verification
+    status: blocked
+    blocked_by: [D10]
+    blocked_note: >
+      The approvals inbox has the send-back action commented out (GENIE1.md §8.8), so there is no
+      screen to hand the user to. The API endpoint exists.
 
   - id: campaign.withdraw_request
     label: Withdraw my own request
@@ -670,8 +753,8 @@ capabilities:
       - I fixed it, put it back in the queue
       - resubmit after the changes
     refusal: >
-      Resubmitting is yours to do - I'll open the request. Worth checking the reason it came back
-      first; I can read that out.
+      Resubmitting is yours to do - I'll open the approvals screen. Worth checking the reason it
+      came back first; it is on the request.
 
     authorization:
       gate: ROLE
@@ -710,6 +793,7 @@ capabilities:
     target_screen: campaign_detail
     utterances:
       - open the campaign
+      - open my campaign
       - take me to my campaign
       - show me the campaign page
       - go to campaign details
@@ -736,8 +820,9 @@ capabilities:
 
     gotchas:
       - >
-        Campaigns live under a brand - /brands/{brandId}/campaigns/{campaignId}. There is no
-        top-level campaigns route, so the brand must be resolved first.
+        The agency console opens a campaign at /campaign/{campaignId} (GENIE1.md, 2026-10-25), so
+        the campaign alone is enough - no brand has to be resolved first. There is still no
+        top-level campaigns list in the nav; a brand's campaigns are under Brand Management.
 
     status: verified
     verified_against: "Ontology screen campaign_detail"
@@ -749,6 +834,9 @@ capabilities:
     target_screen: launch_campaign
     utterances:
       - start a new campaign
+      - launch a new campaign
+      - create a new campaign
+      - make a new campaign
       - open the launch wizard
       - I want to create a campaign
       - take me to campaign creation

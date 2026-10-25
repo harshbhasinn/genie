@@ -6,7 +6,7 @@ audience: [CAMPAIGN_MANAGER, BRAND_MANAGER]
 client_scope: null
 status: published
 owner: genie-build
-source_digest: 5b2dd9e465eb
+source_digest: 824b96556b0c
 verified_against: ontology/screens/brand-dashboard.yaml
 effective_from: null
 effective_to: null
@@ -18,7 +18,7 @@ effective_to: null
 
 # Brand Dashboard
 
-A per-brand view that appears only in the Campaign Manager's navigation. Not present in the Agency Admin set.
+A per-brand view that appears only in the Campaign Manager's navigation. Not present in the Media Partner Admin set.
 
-**Where:** `/brands/{brandId}/dashboard`  
+**Where:** `/brand-management/{brandId}`  
 **Who can see it:** CAMPAIGN_MANAGER, BRAND_MANAGER

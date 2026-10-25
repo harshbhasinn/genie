@@ -217,15 +217,17 @@ queries:
       capability: campaign.explain_performance
       mode: answer
       follow_up: null
-      metrics: [campaign_active_screens, campaign_time_elapsed]
-      unavailable: [campaign_impressions, campaign_spend, campaign_percent_delivered]
+      metrics: [campaign_impressions, campaign_reach, campaign_spend, campaign_active_screens,
+                campaign_time_elapsed]
+      unavailable: [campaign_percent_delivered]
       honest_gap: true
       gap_kind: unserved
     why: >
-      The single most important honest-gap case. Per-campaign delivery is not served,
-      so the answer is budget, state, screens and elapsed time, plus a plain statement
-      that impressions and spend-to-date are not available per campaign. Quoting the
-      committed budget as spend would overstate every unfinished campaign.
+      API 2026-10-23: per-campaign delivery is served now (campaign-analytics), so the answer
+      is state, elapsed time, impressions, reach and spend for an echoed window. What is still
+      not served is delivery against PLAN - nothing returns planned impressions - so percent
+      delivered stays an honest gap. Spend is the window's spendForRange against totalCost:
+      quoting the committed cost as spend would overstate every unfinished campaign.
 
   - id: g014
     query: how is my campaign doing
@@ -234,11 +236,11 @@ queries:
       capability: campaign.explain_performance
       mode: answer
       follow_up: which_campaign
-      metrics: []
-      unavailable: [campaign_impressions, campaign_spend]
-      honest_gap: true
-      gap_kind: unserved
-    why: No campaign in context, so it must ask which - before explaining the gap.
+      metrics: [campaign_impressions, campaign_reach, campaign_spend]
+    why: >
+      No campaign in context, so it must ask which - with the user's own campaigns as the
+      options. API 2026-10-23: per-campaign delivery is served now (campaign-analytics), so the
+      answer is the figures, not a gap.
 
   - id: g015
     query: which brand is performing best
@@ -527,12 +529,13 @@ queries:
       mode: answer
       follow_up: null
       metrics: []
-      unavailable: [campaign_impressions]
+      unavailable: [campaign_verified_view_rate]
       honest_gap: true
       gap_kind: unserved
     why: >
-      Asked ON Campaign Detail, so the thing Genie could not tell them is per-campaign
-      delivery. Three different reasons deserve three different answers - definition disputed,
+      Asked ON Campaign Detail, so the thing Genie could not tell them is what that screen
+      still cannot serve - the camera-verified view rate (delivery itself is served since the
+      campaign-analytics endpoints). Three different reasons deserve three different answers - definition disputed,
       data not served, or role cannot see it. Conflating them is unhelpful.
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -1158,11 +1161,11 @@ queries:
       honest_gap: true
       gap_kind: unserved
     why: >
-      R15 - the four reporting bands are 18-25, 26-35, 36-50 and 51+, opaque strings to be
-      rendered as returned and never re-bucketed into the wizard's five targeting bands. But
+      R15 - the reporting bands are the AgeGroup keys (18-24, 25-34, 35-44, 45-54, 55-64 and 65+), opaque strings to be
+      rendered as returned and never re-bucketed into the wizard's targeting bands. But
       genderSplit and ageDistribution live on the store-owner endpoint, so an agency does not
       get them. The near-miss worth handling: dwellByCohortZone on the content endpoint is
-      keyed "26-35|F" and does expose the same axes - as DWELL SECONDS per cohort, not a share
+      keyed "25-34|F" and does expose the same axes - as DWELL SECONDS per cohort, not a share
       of people. Offering it as an age breakdown would answer a different question.
 
   - id: g096
@@ -1318,3 +1321,120 @@ queries:
       A write Genie cannot perform even though no OTP is involved. R25 and D4 - the
       answer should state 1920x1080 landscape before the handoff, because the upload
       modal itself shows the wrong dimensions.
+
+# ══════════════════════════════════════════════════════════════════════════
+#  Live reads added 2026-10-24: invoices, spending sources, where and when a
+#  campaign played, one approval request, approval history and rules. Worded
+#  differently from the catalog's utterances on purpose.
+# ══════════════════════════════════════════════════════════════════════════
+
+  - id: g107
+    query: how much do we owe AdGrid right now
+    context: {screen: command_centre, role: AD_PARTNER_ADMIN}
+    expect:
+      capability: wallet.explain_invoices
+      mode: answer
+      follow_up: null
+      metrics: []
+    why: What AdGrid bills the agency - the settlement summary, not a balance.
+
+  - id: g108
+    query: is the September invoice paid
+    context: {screen: wallet_management, role: AD_PARTNER_ADMIN}
+    expect:
+      capability: wallet.explain_invoices
+      mode: answer
+      follow_up: null
+      metrics: []
+    why: One named month's bill and its payment status.
+
+  - id: g109
+    query: show me the last few transactions
+    context: {screen: command_centre, role: AD_PARTNER_ADMIN}
+    expect:
+      capability: wallet.explain_spending
+      mode: answer
+      follow_up: null
+      metrics: []
+    why: The latest ledger lines. "Over what period?" would answer a question nobody asked.
+
+  - id: g110
+    query: which city is Diwali Blast doing best in
+    context: {screen: campaign_detail, role: CAMPAIGN_MANAGER}
+    expect:
+      capability: campaign.explain_breakdown
+      mode: answer
+      follow_up: null
+      metrics: []
+    why: Impressions by city (performance-breakdown, groupBy=CITY), not the campaign's totals.
+
+  - id: g111
+    query: when during the day does my campaign get the most plays
+    context: {screen: campaign_detail, role: AD_PARTNER_ADMIN}
+    expect:
+      capability: campaign.explain_daypart
+      mode: answer
+      follow_up: null
+      metrics: []
+    why: Impressions by daypart with the busiest hour.
+
+  - id: g112
+    query: why did my campaign get sent back
+    context: {screen: command_centre, role: CAMPAIGN_MANAGER}
+    expect:
+      capability: approvals.request_status
+      mode: answer
+      follow_up: null
+      metrics: []
+    why: The reason and note are in the request's trail; resubmitting without them is guessing.
+
+  - id: g113
+    query: what's happening with REQ-1136
+    context: {screen: command_centre, role: CAMPAIGN_MANAGER}
+    expect:
+      capability: approvals.request_status
+      mode: answer
+      follow_up: null
+      metrics: []
+    why: A request reference makes that request the subject.
+
+  - id: g114
+    query: has the price changed since I submitted it
+    context: {screen: notifications_approvals, role: AD_PARTNER_ADMIN}
+    expect:
+      capability: approvals.what_changed
+      mode: answer
+      follow_up: null
+      metrics: []
+    why: preview-today - the request as raised against the same values today.
+
+  - id: g115
+    query: what have I approved so far
+    context: {screen: notifications_approvals, role: AD_PARTNER_ADMIN}
+    expect:
+      capability: approvals.history
+      mode: answer
+      follow_up: null
+      metrics: []
+    why: The queue's DECIDED_BY_ME view.
+
+  - id: g116
+    query: what happens to a request if nobody approves it
+    context: {screen: command_centre, role: CAMPAIGN_MANAGER}
+    expect:
+      capability: approvals.explain_rules
+      mode: answer
+      follow_up: null
+      metrics: []
+    why: The agency's automation settings - the deadline and what happens on timeout.
+
+  - id: g117
+    query: approve the funding request from Neha
+    context: {screen: notifications_approvals, role: AD_PARTNER_ADMIN}
+    expect:
+      capability: approvals.approve_request
+      mode: handoff
+      follow_up: null
+      metrics: []
+      refuses: true
+    why: OTP-gated. Genie names the request and hands off.

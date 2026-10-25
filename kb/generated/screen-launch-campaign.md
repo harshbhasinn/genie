@@ -6,7 +6,7 @@ audience: [AD_PARTNER_ADMIN, CAMPAIGN_MANAGER]
 client_scope: null
 status: published
 owner: genie-build
-source_digest: 1978f64e1888
+source_digest: 94c06b082332
 verified_against: ontology/screens/launch-campaign.yaml
 effective_from: null
 effective_to: null
@@ -20,7 +20,7 @@ effective_to: null
 
 The four-step wizard that books a campaign. Reached from a brand, not from the top nav. This is the screen AdGuide prefills - every value on the Recommended plan card maps to a field here, and the user edits before submitting.
 
-**Where:** `/brands/{brandId}/campaigns/new`  
+**Where:** `/campaign/create-campaign/{brandId}`  
 **Who can see it:** AD_PARTNER_ADMIN, CAMPAIGN_MANAGER
 
 
@@ -34,13 +34,13 @@ What this campaign will cost, as priced by the selection made so far.
 
 *unit: currency_inr · live*
 
+- Targeted campaigns are postpaid - nothing is charged at confirm.
+
 - adPartnerToBrandTotalCost is what the brand pays; adgridToAdPartnerTotalCost is the agency's own cost basis and is never surfaced. totalCost is the figure the plan card means.
 
 - Two legs are priced. The WALLET pays leg 1 (AdGrid to AdPartner) PLUS 18% GST - the coverage check is balance >= adgridCost x 1.18. Leg 2 (AdPartner to Brand) carries no GST and is recorded as a receivable.
 
 - The wizard shows only the brand-facing leg ('Cost to Brand' / 'Base Amount'). The AdGrid-to-AdPartner per-cell breakdown is marked INTERNAL and must never be surfaced.
-
-- Targeted campaigns are postpaid - nothing is charged at confirm.
 
 ### Estimated Impressions
 
@@ -48,9 +48,9 @@ Ad-views this selection is projected to deliver over the flight.
 
 *unit: count · live*
 
-- This counts SLOTS, which is plays, which is impressions as the platform defines them - R18, playback events and not people. It assumes every booked slot plays; downtime makes the real figure lower, which is what screen_uptime is for.
-
 - Impressions are playback events, not people. Reach is the de-duplicated person count.
+
+- This counts SLOTS, which is plays, which is impressions as the platform defines them - R18, playback events and not people. It assumes every booked slot plays; downtime makes the real figure lower, which is what screen_uptime is for.
 
 ### Avg CPM
 

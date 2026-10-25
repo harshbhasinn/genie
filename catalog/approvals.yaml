@@ -1,0 +1,157 @@
+domain: approvals
+description: >
+  Maker-checker requests: a campaign manager raises one (a campaign to confirm, funds to
+  allocate), an admin decides. Genie reads the queue, one request in full, and what changed
+  since it was raised. Every decision is OTP-gated or on the record, so Genie explains and
+  hands off - it never approves, rejects, sends back, withdraws or resubmits.
+
+capabilities:
+
+  - id: approvals.request_status
+    label: Status of an approval request
+    description: Where one request stands - who decided what, why it was sent back or rejected, who still has to approve, when it expires, why it failed.
+    genie_mode: answer
+    mutating: false
+    target_screen: notifications_approvals
+    utterances:
+      - where is my request
+      - what's the status of my request
+      - why was my campaign sent back
+      - why was my request rejected
+      - who needs to approve my campaign
+      - when does my request expire
+      - is my campaign approved
+      - why did my request fail
+    authorization:
+      gate: ROLE
+      roles: [AD_PARTNER_ADMIN, CAMPAIGN_MANAGER, NETWORK_PARTNER_ADMIN]
+      scope: "The BFF scopes requests to the caller: a maker sees their own, an approver their queue."
+    gotchas:
+      - >
+        The request is picked like a campaign: named (its reference, e.g. REQ-1136, or what it is
+        about), the only open one, or the user is asked which. A campaign named in the message is
+        matched to its request through scopeRef.
+      - >
+        The reason a request was sent back or rejected is in its trail (reasonCode, note), not on
+        the list rows. Read it before telling a maker to resubmit.
+    execution:
+      state_changing: false
+      method: GET
+      path: "/api/v1/approvals/{referenceCode}"
+      layer: bff
+      note: "stages[], trail[], finalDeadlineAtEpochMs, terminalReason, lastFailureCode."
+    status: pending_verification
+
+  - id: approvals.history
+    label: Past approval decisions
+    description: Requests already decided - what I approved, sent back or rejected, and what happened to the requests I raised.
+    genie_mode: answer
+    mutating: false
+    target_screen: notifications_approvals
+    utterances:
+      - what did I approve
+      - what have I approved recently
+      - show my past approvals
+      - what did I reject
+      - what happened to my requests
+      - show my approval history
+    authorization:
+      gate: ROLE
+      roles: [AD_PARTNER_ADMIN, CAMPAIGN_MANAGER, NETWORK_PARTNER_ADMIN]
+    gotchas:
+      - >
+        An approver's history is the queue's DECIDED_BY_ME view; a maker's is their own requests
+        in every status. A campaign manager has no queue, so for that role history means mine.
+    execution:
+      state_changing: false
+      method: GET
+      path: "/api/v1/approvals/queue"
+      layer: bff
+      note: "view=DECIDED_BY_ME for approvers; GET /api/v1/approvals/mine (any status) for makers."
+    status: pending_verification
+
+  - id: approvals.what_changed
+    label: What changed since a request was raised
+    description: The request's values when it was raised against the same values today, so an approver does not decide on stale numbers.
+    genie_mode: answer
+    mutating: false
+    target_screen: notifications_approvals
+    utterances:
+      - has anything changed since it was requested
+      - what changed in this request
+      - is this request still up to date
+      - has the cost changed since the request
+    authorization:
+      gate: ROLE
+      roles: [AD_PARTNER_ADMIN, CAMPAIGN_MANAGER, NETWORK_PARTNER_ADMIN]
+    gotchas:
+      - >
+        requested, today and delta are untyped objects in the spec, so their fields are not
+        documented. Genie compares the scalar fields present in both and reports them as returned.
+    execution:
+      state_changing: false
+      method: GET
+      path: "/api/v1/approvals/{referenceCode}/preview-today"
+      layer: bff
+    status: pending_verification
+
+  - id: approvals.explain_rules
+    label: How approvals work here
+    description: Who approves each kind of request, how long they have, and what happens if no one decides.
+    genie_mode: answer
+    mutating: false
+    target_screen: notifications_approvals
+    utterances:
+      - how long do approvers have
+      - what happens if nobody approves
+      - who approves my campaigns
+      - why does my campaign need approval
+      - is auto approve on
+      - what are the approval rules
+      - show the approval settings
+      - who has to approve my campaign
+      - what happens if no one approves a request
+      - is auto approval switched on
+    authorization:
+      gate: ROLE
+      roles: [AD_PARTNER_ADMIN, CAMPAIGN_MANAGER, NETWORK_PARTNER_ADMIN]
+    gotchas:
+      - >
+        Deadlines and timeouts are the agency's automation settings (effectiveSlaHours,
+        effectiveOnTimeout: AUTO_APPROVE, AUTO_REJECT, EXPIRE or MANUAL). Who approves comes from
+        /approval-configs, which is not client-scoped and may be AdOps-only; when it is refused the
+        answer leaves approvers out rather than guessing.
+    execution:
+      state_changing: false
+      method: GET
+      path: "/api/v1/clients/{clientId}/approval-automation"
+      layer: bff
+      note: "Approvers: GET /api/v1/approval-configs?enabled=true, stages[].roles."
+    status: pending_verification
+
+  - id: approvals.approve_request
+    label: Approve a request
+    description: Approve a pending request of any kind - funds for a manager, a top-up, an invoice.
+    genie_mode: handoff
+    mutating: true
+    otp_gated: true
+    target_screen: notifications_approvals
+    utterances:
+      - approve the top-up request
+      - approve the fund request
+      - approve the funding request
+      - approve the invoice request
+      - approve this request
+    refusal: >
+      Approving needs an OTP sent to your registered mobile, so it has to be you. I'll open the
+      approvals queue with the pending requests listed.
+    authorization:
+      gate: ROLE
+      roles: [AD_PARTNER_ADMIN, NETWORK_PARTNER_ADMIN]
+    execution:
+      method: NONE
+      path: "/api/v1/approvals/{referenceCode}/approve"
+      layer: frontend
+      state_changing: true
+      note: "OTP-gated. Genie deep-links only."
+    status: pending_verification

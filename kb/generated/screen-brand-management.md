@@ -6,7 +6,7 @@ audience: [AD_PARTNER_ADMIN, CAMPAIGN_MANAGER]
 client_scope: null
 status: published
 owner: genie-build
-source_digest: ea52e57edeaa
+source_digest: d6adf96c1db6
 verified_against: ontology/screens/brand-management.yaml
 effective_from: null
 effective_to: null
@@ -18,9 +18,9 @@ effective_to: null
 
 # Brand Management
 
-The brands beneath this agency, and everything about one of them - its summary, where its screens are, its recent campaigns, and the people who own it. Campaigns and the creative library are both reached from here, not from the top nav.
+Your brands, and everything about one of them - its summary, where its screens are, its recent campaigns, and the people who own it. Campaigns and the creative library are both reached from here, not from the top nav.
 
-**Where:** `/brands/{brandId}`  
+**Where:** `/brand-management/{brandId}`  
 **Who can see it:** AD_PARTNER_ADMIN, CAMPAIGN_MANAGER
 
 

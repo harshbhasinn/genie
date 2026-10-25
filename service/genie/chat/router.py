@@ -86,6 +86,7 @@ class UIContextIn(BaseModel):
     client_id: str | None = None
     visible_metrics: list[str] = Field(default_factory=list)
     selected_entity: str | None = None
+    brand_id: str | None = None
 
 
 class ChatRequest(BaseModel):

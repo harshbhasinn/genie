@@ -2,13 +2,12 @@ screen:
   id: wallet_management
   kind: screen
   title: Wallet Management
-  route: /wallet
+  route: /wallet-management
   nav_label: Wallet Management
   audience: [AD_PARTNER_ADMIN]
   source_frame: "Agency Admin Dashboard (1.5).docx - Wallet Management (image8)"
   purpose: >
-    Billing, credits, sub-wallet allocations and payment history. The agency holds one wallet and
-    each campaign manager holds a sub-wallet beneath it; campaigns are paid from whichever applies.
+    Billing, credits, sub-wallet allocations and payment history. You hold one main wallet and each campaign manager holds a sub-wallet beneath it; campaigns are paid from whichever applies.
   entities: [wallet, client, user, brand]
   related_screens: [command_centre, team_management]
 
@@ -47,7 +46,7 @@ screen:
 
     - id: main_wallet_balance
       label: Main Wallet Balance
-      definition: Prepaid credit held by the agency and available to allocate or spend.
+      definition: Prepaid credit you hold, available to allocate or spend.
       formula: "top-ups minus consumption minus allocations out"
       unit: currency_inr
       freshness: live
@@ -78,11 +77,11 @@ screen:
       definition: Credit already allocated out to campaign managers' sub-wallets.
       unit: currency_inr
       freshness: live
-      gotchas:
-        - >
-          Committed, not spendable by the agency. Counting it as available is what makes the runway
-          alert under-fire.
       status: pending_verification
+      user_notes:
+        - >
+          Already handed to campaign managers, so you can't spend it. Counting it as
+          available makes the runway look longer than it is.
 
     - id: month_consumption
       source:
@@ -91,7 +90,7 @@ screen:
         scope_key: client_id
         field: "consumedThisMonth"
       label: This Month's Consumption
-      definition: Agency spend in the current month.
+      definition: Your spend in the current month.
       unit: currency_inr
       freshness: live
       gotchas:
@@ -143,7 +142,7 @@ screen:
         scope_key: client_id
         field: "totalAllocated"
       label: Allocated
-      definition: Credit moved from the agency wallet into this manager's sub-wallet.
+      definition: Credit moved from the main wallet into this manager's sub-wallet.
       unit: currency_inr
       freshness: live
       status: pending_verification

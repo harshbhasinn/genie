@@ -2,12 +2,12 @@ screen:
   id: team_management
   kind: screen
   title: User Management
-  route: /team
+  route: /team-management
   nav_label: Team Management
   audience: [AD_PARTNER_ADMIN]
   source_frame: "Agency Admin Dashboard (1.5).docx - Team Management (image9)"
   purpose: >
-    The people who operate this agency's campaigns - campaign managers and external marketing-agency
+    The people who run your campaigns - campaign managers and external marketing-agency
     partners - what each may do, and how much credit sits in their sub-wallet.
   entities: [user, wallet, brand, campaign]
   related_screens: [command_centre, wallet_management]

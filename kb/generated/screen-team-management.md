@@ -6,7 +6,7 @@ audience: [AD_PARTNER_ADMIN]
 client_scope: null
 status: published
 owner: genie-build
-source_digest: 966700257ac8
+source_digest: 36ab33b857bd
 verified_against: ontology/screens/team-management.yaml
 effective_from: null
 effective_to: null
@@ -18,9 +18,9 @@ effective_to: null
 
 # User Management
 
-The people who operate this agency's campaigns - campaign managers and external marketing-agency partners - what each may do, and how much credit sits in their sub-wallet.
+The people who run your campaigns - campaign managers and external marketing-agency partners - what each may do, and how much credit sits in their sub-wallet.
 
-**Where:** `/team`  
+**Where:** `/team-management`  
 **Who can see it:** AD_PARTNER_ADMIN
 
 > The navigation calls this **Team Management** while the page heading reads **User Management**. Both names refer to the same screen.

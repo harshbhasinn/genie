@@ -131,9 +131,10 @@ def _parse_screen(doc: dict, path: Path) -> Screen:
             screen_id=s["id"], definition=raw.get("definition"),
             formula=raw.get("formula"), unit=raw.get("unit"),
             freshness=raw.get("freshness"), source=_source(raw.get("source")),
+            user_notes=_tuple(raw.get("user_notes")),
             gotchas=_tuple(raw.get("gotchas")),
             blocked_by=_tuple(raw.get("blocked_by")),
-            blocked_note=raw.get("blocked_note"),
+            unavailable_note=raw.get("unavailable_note"),
         ))
 
     actions = tuple(

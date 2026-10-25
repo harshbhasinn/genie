@@ -76,22 +76,25 @@ class StaticFileToken(TokenSource):
 
     def __init__(self, path: Path):
         self._path = path
-        self._mtime: float | None = None
+        # (mtime_ns, size): mtime alone misses a rewrite inside one clock tick
+        # (~15 ms on Windows), which served a renewed login's EXPIRED predecessor.
+        self._stamp: tuple[int, int] | None = None
         self._token: str | None = None
         self._info: TokenInfo | None = None
 
     def _refresh(self) -> None:
         try:
-            mtime = self._path.stat().st_mtime
+            st = self._path.stat()
         except OSError:
-            self._token, self._info, self._mtime = None, None, None
+            self._token, self._info, self._stamp = None, None, None
             return
-        if mtime == self._mtime:
+        stamp = (st.st_mtime_ns, st.st_size)
+        if stamp == self._stamp:
             return
         raw = self._path.read_text(encoding="utf-8").strip()
         if raw.lower().startswith("bearer "):
             raw = raw[7:].strip()
-        self._mtime, self._token = mtime, raw or None
+        self._stamp, self._token = stamp, raw or None
         self._info = decode(raw) if raw else None
         if self._info:
             log.info("token loaded: roles=%s expires_in=%ss",
@@ -138,7 +141,7 @@ def bearer(header: str | None) -> str | None:
 # on the way. QA access tokens live about five minutes.
 REFRESH_MARGIN_S = 30
 
-# What the Partner Hub frontend itself sends on its auth calls (read from the QA
+# What the dashboard frontend on QA itself sends on its auth calls (read from the QA
 # bundle): the Keycloak client is "adg-dashboard". The token's own azp wins.
 DASHBOARD_CLIENT_ID = "adg-dashboard"
 
@@ -210,6 +213,7 @@ class RefreshingFileToken(StaticFileToken):
             log.warning(self.last_refresh_error)
             return self.token()
         _write_secret(self._path, access)
+        self._stamp = None              # re-read: this process just changed the file
         if new_refresh:
             _write_secret(self._refresh_path, new_refresh)
         self.last_refresh_error = None

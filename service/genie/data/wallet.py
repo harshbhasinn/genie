@@ -11,8 +11,8 @@ Sources follow the ontology (ontology/screens/wallet-management.yaml):
   sub_wallet_total      GET /api/v1/clients/{clientId}/members/wallet-overview totalSubWalletBalance
   total_credits_owned   computed here: main + sub-wallets (a UI aggregate, never a ledger)
   month_consumption     GET /api/v1/clients/{clientId}/wallet/kpis             consumedThisMonth
-  wallet_runway_days    GET /api/v1/clients/{clientId}/wallet/kpis             runwayMonths — MONTHS (ruling R32)
-  low balance flag      GET /api/v1/clients/{clientId}/wallet/kpis             lowBalance, lowBalanceThreshold
+  wallet_runway_days    GET /api/v1/clients/{clientId}/wallet/kpis      runwayMonths — MONTHS (R32)
+  low balance flag      GET /api/v1/clients/{clientId}/wallet/kpis      lowBalance, lowBalanceThreshold
   manager_*             GET /api/v1/clients/{clientId}/members/wallet-overview members[]
   user_subwallet_balance GET /api/v1/clients/{clientId}/members/{userId}/wallet/summary currentBalance
 
@@ -20,7 +20,6 @@ Runway is read, never recomputed: the backend already decided what "runway" mean
 """
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass, field
 from decimal import Decimal
 
@@ -41,6 +40,11 @@ class LiveFact:
     display: str            # what the card shows, formatted by code
     short: str | None       # ₹15.75 L — offered to the narrator as well
     source: str             # endpoint template + field, for provenance
+
+    def fact_line(self) -> str:
+        """ "Main wallet: ₹15,75,000 (₹15.75 L)" - the figure as a model is given it."""
+        return f"{self.label}: {self.display}" + (
+            f" ({self.short})" if self.short and self.short != self.display else "")
 
     def as_meta(self) -> dict:
         v = self.value
@@ -85,21 +89,11 @@ async def agency_wallet(bff: BffClient, token: str, client_id: str, *,
                         with_managers: bool = True) -> WalletView:
     """Everything an agency admin's wallet position needs, read in parallel."""
     p = {"clientId": client_id}
-    calls = [bff.get(BALANCE, token=token, path_params=p),
-             bff.get(KPIS, token=token, path_params=p)]
+    reads = {BALANCE: {"path_params": p}, KPIS: {"path_params": p}}
     if with_managers:
-        calls.append(bff.get(OVERVIEW, token=token, path_params=p,
-                             params={"page": 0, "size": 100}))
-    results = await asyncio.gather(*calls, return_exceptions=True)
+        reads[OVERVIEW] = {"path_params": p, "params": {"page": 0, "size": 100}}
     view = WalletView()
-    by_ep: dict[str, dict] = {}
-    for ep, res in zip((BALANCE, KPIS, OVERVIEW), results):
-        if isinstance(res, BffError):
-            view.problems[ep] = res.kind
-        elif isinstance(res, BaseException):
-            view.problems[ep] = "unavailable"
-        else:
-            by_ep[ep] = res.data or {}
+    by_ep, view.problems = await bff.get_all(token, reads)
 
     bal, kpis, ov = by_ep.get(BALANCE), by_ep.get(KPIS), by_ep.get(OVERVIEW)
     main = _money("main_wallet_balance", "Main wallet", (bal or {}).get("balance"),

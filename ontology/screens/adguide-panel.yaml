@@ -51,9 +51,10 @@ screen:
       definition: Screens the recommended plan would book.
       unit: count
       freshness: live
-      gotchas:
+      user_notes:
         - >
           Availability read now is not availability held - a draft reserves nothing, and screens are held for ten minutes at confirm. A plan can go stale between planning and booking.
+      gotchas:
         - >
           BROADCASTING ONLY. A Targeted campaign reserves no screens at all, so this figure is
           meaningless for it - see R29.
@@ -119,10 +120,10 @@ screen:
       formula: "total campaign cost / flight days"
       unit: per_day
       freshness: live
-      gotchas:
+      status: pending_verification
+      user_notes:
         - >
           Flat across the flight, because the cost model is per slot per day. Real burn varies with delivery; this is a plan figure, not a pacing figure.
-      status: pending_verification
 
     - id: plan_wallet_reservation
       source:
@@ -135,6 +136,9 @@ screen:
       formula: "adgrid cost x 1.18, against the wallet the payer draws from"
       unit: currency_inr
       freshness: live
+      user_notes:
+        - >
+          Which wallet it draws from depends on the viewer: a campaign manager's own sub-wallet if their role has one, otherwise the main wallet.
       gotchas:
         - >
           POLICY 2026-09-24 - resolved in favour of the API/backend over the design. See RESOLUTION-POLICY.md.
@@ -145,9 +149,6 @@ screen:
         - >
           MUST NOT APPEAR AT ALL for a Targeted campaign - those are postpaid, and nothing is
           charged at confirm.
-        - >
-          Which wallet it draws from depends on the viewer: a campaign manager's own sub-wallet if
-          their role has one, otherwise the agency wallet.
       status: pending_verification
 
     - id: plan_headroom

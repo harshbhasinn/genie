@@ -6,7 +6,7 @@ audience: [AD_PARTNER_ADMIN, CAMPAIGN_MANAGER]
 client_scope: null
 status: published
 owner: genie-build
-source_digest: 873ff8b40da9
+source_digest: dd8c67d27f9a
 verified_against: ontology/screens/command-centre.yaml
 effective_from: null
 effective_to: null
@@ -18,7 +18,7 @@ effective_to: null
 
 # Command Centre
 
-The agency's home. Network scale and audience, how revenue splits between the two selling motions, delivery and pricing, business health (money in, owed, kept), and where the screens and demand are concentrated.
+Your home screen. Network scale and audience, how revenue splits between the two selling motions, delivery and pricing, business health (money in, owed, kept), and where the screens and demand are concentrated.
 
 **Where:** `/command-centre`  
 **Who can see it:** AD_PARTNER_ADMIN, CAMPAIGN_MANAGER
@@ -116,15 +116,19 @@ Prepaid credit that funds revenue-share consumption as campaigns run.
 
 ### Wallet runway
 
-How many days the current balance lasts at the recent burn rate.
+How many months the main wallet's balance lasts at the recent rate of spending.
 
-**How it is worked out:** `balance ÷ burn per day`
+**How it is worked out:** `main wallet balance ÷ recent monthly spend, calculated by the dashboard`
 
-*unit: days · live*
+*unit: months · live*
+
+- Not calculated when nothing has been spent this month - there is no rate to project from.
 
 - POLICY 2026-09-24 - resolved in favour of the API/backend over the design. See RESOLUTION-POLICY.md. Backend computes runwayMonths and lowBalance. Check the unit before quoting.
 
 - Drives the wallet_runway advisor. Threshold is config, not a literal.
+
+- API 2026-10-23 (API over design) - runwayMonths is MONTHS, and is null when nothing has been spent this month: with no spending there is no rate to project from. The deck's "~6 days" is the design, not the data.
 
 ### Gross Billing / Revenue
 
@@ -138,7 +142,7 @@ Total billing booked this month across every running campaign.
 
 ### Gross Profit
 
-What the agency keeps after AdGrid's platform cost.
+What you keep after AdGrid's platform cost.
 
 **How it is worked out:** `gross billing − platform cost; margin = gross profit ÷ gross billing`
 
@@ -148,7 +152,7 @@ What the agency keeps after AdGrid's platform cost.
 
 ### Platform Invoice
 
-What AdGrid bills the agency this cycle — revenue-share plus screen rental.
+What AdGrid bills you this cycle — revenue-share plus screen rental.
 
 **How it is worked out:** `RevShare consumption + screen rental`
 
@@ -180,13 +184,13 @@ Share of the month's sellable ad slots already sold.
 
 *unit: percent*
 
+- Loop capacity differs by tier - 120s premium, 60s standard - so a slot means different things on each.
+
 - Utilisation is one minus free over total, and image and video are separate ladders - combining them needs the sold mix and should be labelled.
 
 - loopTiers gives maxImage and maxVideo per loop length, so a slot on a 120s premium screen is not the same unit as one on a 60s standard screen.
 
 - POLICY 2026-09-24 - definition taken from the deck's annotation card, with the backend's vocabulary where they differ. See RESOLUTION-POLICY.md.
-
-- Loop capacity differs by tier - 120s premium, 60s standard - so a slot means different things on each.
 
 ### Targeting Capable | Camera + Intelligence
 
@@ -196,11 +200,11 @@ Share of screens with a camera and on-device intelligence, so audience targeting
 
 *unit: percent*
 
+- This is the pool a Targeted campaign can serve into.
+
 - R31 - the design defines targeting-capable as 'has a camera'. The API's own targeting path counts NON_PREMIUM devices instead: targeted-rate-check reports noInventoryCells as 'cells this client holds no NON_PREMIUM devices in'. Until someone confirms the two sets are identical, Genie says which it counted.
 
 - POLICY 2026-09-24 - definition taken from the deck's annotation card, with the backend's vocabulary where they differ. See RESOLUTION-POLICY.md.
-
-- This is the pool a Targeted campaign can serve into.
 
 ### Active campaigns
 
@@ -212,7 +216,7 @@ Share of screens with a camera and on-device intelligence, so audience targeting
 
 ### Brands managed
 
-Brands under this agency.
+Your brands.
 
 *unit: count · live*
 
@@ -234,15 +238,15 @@ Share of scheduled playtime the screens were actually up, from proof-of-play.
 
 ### Share of voice
 
-Share of each loop this agency's campaigns occupy, averaged across screen sections.
+Share of each loop your campaigns occupy, averaged across screen sections.
 
 *unit: percent*
+
+- A client's share of a screen is fixed when its contract starts - clients never compete for the same slots.
 
 - Share of voice is this client's slots over the loop's capacity. A client's share of a screen is fixed when its contract starts - clients never compete for the same slots, so this does not move with anyone else's buying.
 
 - POLICY 2026-09-24 - definition taken from the deck's annotation card, with the backend's vocabulary where they differ. See RESOLUTION-POLICY.md.
-
-- A client's share of a screen is fixed when its contract starts - clients never compete for the same slots.
 
 ### Fill Rate by Section
 
@@ -280,9 +284,9 @@ Fill rate by time-of-day.
 
 *unit: percent*
 
-- Same untyped-grid caveat as fill_rate_by_section. Dayparts are MORNING 10-13, AFTERNOON 13-16, EVENING 16-19, NIGHT 19-22.
-
 - A daypart stays bookable until it ends, so today's later dayparts are usually still sellable.
+
+- Same untyped-grid caveat as fill_rate_by_section. Dayparts are MORNING 10-13, AFTERNOON 13-16, EVENING 16-19, NIGHT 19-22.
 
 - POLICY 2026-09-24 - resolved in favour of the API/backend over the design. See RESOLUTION-POLICY.md. Bands are 10-13 / 13-16 / 16-19 / 19-22 over a 10:00-22:00 day. The Command Centre chart is being corrected.
 

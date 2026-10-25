@@ -6,7 +6,7 @@ audience: [AD_PARTNER_ADMIN, CAMPAIGN_MANAGER]
 client_scope: null
 status: published
 owner: genie-build
-source_digest: 87366c0712a9
+source_digest: 5d34f61c6c6c
 verified_against: ontology/screens/creative-library.yaml
 effective_from: null
 effective_to: null
@@ -20,7 +20,7 @@ effective_to: null
 
 One brand's ad files, their review state, and the rules for making them. Only approved creatives can be attached to a campaign, so this screen gates whether a campaign can be confirmed at all.
 
-**Where:** `/brands/{brandId}/creatives`  
+**Where:** `/brand-management/library/{brandId}`  
 **Who can see it:** AD_PARTNER_ADMIN, CAMPAIGN_MANAGER
 
 

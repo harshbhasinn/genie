@@ -14,15 +14,10 @@ from dataclasses import dataclass, field
 
 from ..ontology import Ontology
 from ..ontology.models import Capability, Metric, Screen, Status
-import re
+from ..roles import a_label
 
 from .lexical import tokens
 
-
-# "R4 - ...", "D10 - ...", "POLICY 2026-09-24 - ...", "CONTRACT v3.1 ..." — notes
-# to ourselves about why a definition says what it says. The reasoning inside is
-# often worth telling a user; the tag never is.
-_INTERNAL_TAG = re.compile(r"^(POLICY \d{4}|CONTRACT v|[RDBCN]\d{1,2}[ .:-])")
 
 
 @dataclass(slots=True)
@@ -81,7 +76,10 @@ def resolve_metric_scored(text: str, ontology: Ontology, *, screen: str | None,
     return None, 0.0
 
 
-def metric_facts(metric: Metric) -> Facts:
+def metric_facts(metric: Metric, screen_title: str | None = None) -> Facts:
+    """The definition, the user-written notes, and where it is shown - and a hint that
+    asks only for what these hold. Asked for an exclusion or a common mistake the notes
+    do not give, a model supplies a plausible one (live QA 2026-10-25)."""
     facts = Facts()
     if metric.definition:
         facts.add("definition", " ".join(metric.definition.split()),
@@ -91,28 +89,35 @@ def metric_facts(metric: Metric) -> Facts:
         facts.add("formula", metric.formula, metric_id=metric.id)
 
     if metric.status is Status.BLOCKED:
-        note = " ".join((metric.blocked_note or "").split())
-        facts.add("unavailable", note or "No endpoint returns this.",
+        # Only the user-written reason; the YAML's blocked_note is for engineers.
+        note = " ".join((metric.unavailable_note or "").split())
+        facts.add("unavailable", note or "This figure isn't available in the dashboard yet.",
                   metric_id=metric.id, blocked_by=list(metric.blocked_by))
-        facts.prose_hint = (
-            "Lead with what it means, in the definition's own words. Then say "
-            "plainly that the FIGURE is not served — the definition is known, "
-            "the data is not. Use the caveats to say what it would and would "
-            "not have counted, and name the nearest thing they CAN see.")
-    else:
-        facts.prose_hint = (
-            "Lead with what it means, in the definition's own words, then make "
-            "it useful: what it excludes, the mistake people make reading it, "
-            "where on this screen it appears. You do NOT have the current "
-            "value — say so once, briefly, and do not invent one.")
 
-    for gotcha in metric.gotchas[:3]:
-        text = " ".join(gotcha.split())
-        # Strip our own provenance tags. The earlier version listed "R3" as a
-        # literal and so caught exactly one conflict id out of thirty-three.
-        if _INTERNAL_TAG.match(text):
-            continue
+    # Only notes written for users. A metric with none gets its definition alone.
+    notes = [" ".join(n.split()) for n in metric.user_notes][:3]
+    for text in notes:
         facts.add("caveat", text, metric_id=metric.id)
+    # A blocked figure is shown nowhere, so it gets no "shown on" fact.
+    shown = screen_title if metric.status is not Status.BLOCKED else None
+    if shown:
+        facts.add("screen", f"Shown on the {shown} screen.", metric_id=metric.id)
+
+    hint = ["Lead with what it means, in the definition's own words."]
+    if metric.status is Status.BLOCKED:
+        hint.append("Then say plainly that the FIGURE is not served — the definition is "
+                    "known, the data is not.")
+    else:
+        hint.append("You do NOT have the current value — say so once, briefly, and do not "
+                    "invent one.")
+    if notes:
+        hint.append("Then make it useful with the caveats: what they say it excludes, the "
+                    "mistake people make reading it, why it matters.")
+    if shown:
+        hint.append("Say which screen shows it.")
+    hint.append("Add nothing about what it excludes, how it is misread or where it appears "
+                "beyond what FACTS says; if FACTS says little, the answer is short.")
+    facts.prose_hint = " ".join(hint)
     return facts
 
 
@@ -135,7 +140,7 @@ def screen_facts(screen: Screen, ontology: Ontology, role: str | None) -> Facts:
     facts.prose_hint = (
         "Say what this screen is for, then what is worth doing on it. Mention "
         "what is NOT served here if anything, and flag anything needing an OTP "
-        "as theirs to do.")
+        "as theirs to do. Each of these only where FACTS says it; otherwise leave it out.")
     return facts
 
 
@@ -150,9 +155,13 @@ def capability_facts(ontology: Ontology, roles: frozenset[str],
         if roles and not cap.permitted_for(roles, permissions):
             continue
         by_mode.setdefault(cap.mode.value, []).append(cap.label)
+    yours = by_mode.pop("handoff", [])
     for mode, labels in sorted(by_mode.items()):
         facts.add("can", ", ".join(sorted(labels)[:12]), mode=mode,
                   count=len(labels))
+    if yours:
+        facts.add("theirs", "The user does these; Genie only opens the right screen: "
+                  + ", ".join(sorted(yours)[:12]), mode="handoff", count=len(yours))
     facts.prose_hint = (
         "Say what you can do, and be specific about the limits: you plan and "
         "fill in forms, the user submits, and anything needing an OTP has to be "
@@ -174,7 +183,7 @@ def navigate_facts(cap: Capability, ontology: Ontology,
 
     if role and not screen.visible_to(role):
         # Deep-linking into a 403 is worse than saying no. This is the g086 case.
-        facts.add("denied", f"{screen.title} is not available to {role}.",
+        facts.add("denied", f"{screen.title} is not available to {a_label(role)}.",
                   screen_id=screen.id, role=role)
         facts.prose_hint = (
         "Say this screen is not in their navigation and who does have it. One "
@@ -189,7 +198,7 @@ def navigate_facts(cap: Capability, ontology: Ontology,
 def denied_facts(cap: Capability, role: str | None) -> Facts:
     """Understood, and not this user's to do. Say which, not "I don't know"."""
     facts = Facts()
-    who = f" to {role}" if role else ""
+    who = f" to {a_label(role)}" if role else ""
     facts.add("denied", f"{cap.label} is not available{who}.",
               capability=cap.id, role=role,
               roles_allowed=list(cap.authorization.roles),

@@ -7,7 +7,7 @@ capabilities:
 
   - id: brand.list
     label: List brands
-    description: Brands under this agency, with campaign counts and billings.
+    description: Your brands, with campaign counts and billings.
     genie_mode: answer
     mutating: false
     otp_gated: false

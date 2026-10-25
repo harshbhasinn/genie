@@ -132,7 +132,7 @@ def test_token_and_portal_go_on_every_call():
     assert sent["authorization"] == f"Bearer {TOKEN}" and sent["x-portal-id"] == "AGENCY_PORTAL"
 
 
-@pytest.mark.parametrize("status,kind", [(401, "signed_out"), (403, "forbidden"),
+@pytest.mark.parametrize("status,kind", [(401, "signed_out"), (403, "forbidden"), (400, "rejected"),
                                          (404, "not_found"), (503, "unavailable")])
 def test_errors_keep_their_meaning_and_never_carry_the_token(status, kind):
     fake = FakeBff({"/api/v1/me": (status, envelope(None, False))})
@@ -294,16 +294,23 @@ class InventingModel:
 
 def test_a_model_that_invents_a_number_is_replaced_by_the_template(ontology):
     responder = Responder(ontology, InventingModel("You have roughly ₹16 L in the main wallet."),
-                          bff=client_for(FakeBff()))
+                          bff=client_for(FakeBff()), live_wording="model")
     final = run(responder, admin_session("wallet_management"), "explain my wallet position")[-1]
     assert final.meta["narrated_by"] == "template" and final.meta["rejected_numbers"] == ["16"]
 
 
 def test_a_model_that_uses_the_card_is_kept(ontology):
     responder = Responder(ontology, InventingModel("The main wallet has ₹15.75 L to allocate."),
-                          bff=client_for(FakeBff()))
+                          bff=client_for(FakeBff()), live_wording="model")
     final = run(responder, admin_session("wallet_management"), "explain my wallet position")[-1]
     assert final.meta["narrated_by"] == "model"
+
+
+def test_by_default_the_template_words_live_figures_even_with_a_model(ontology):
+    responder = Responder(ontology, InventingModel("The main wallet has ₹15.75 L to allocate."),
+                          bff=client_for(FakeBff()))
+    final = run(responder, admin_session("wallet_management"), "explain my wallet position")[-1]
+    assert final.meta["narrated_by"] == "template" and "₹15,75,000" in final.content
 
 
 # ── the HTTP endpoint: /me is the authority, not the browser ─────────────
@@ -346,7 +353,7 @@ def test_an_expiring_token_is_renewed_from_the_refresh_token(tmp_path):
     assert refresh.read_text().strip() == "refresh-2"
     req = seen[0]
     assert req.url.host == "ag-dashboard-bff.qa.adgrid.ai" and req.url.path == "/v1/auth/refresh-token"
-    # client_id is a HEADER on the auth endpoints (spec), exactly as the Partner Hub sends it
+    # client_id is a HEADER on the auth endpoints (spec), exactly as the QA dashboard frontend sends it
     assert req.headers["client_id"] == "adg-dashboard" and "client_id" not in req.url.params
     assert req.headers["x-portal-id"] == "AGENCY_PORTAL"
     assert not list(tmp_path.glob("*.tmp*"))     # the temp file was renamed into place
@@ -460,3 +467,23 @@ def test_overview_words_only_skip_the_wallet_balance_question(ontology):
                 assert _is_relevant(f, cap, q) == _is_relevant(f, cap, q + " summary overview"), (cap.id, q)
                 checked += 1
     assert checked > 0
+
+
+def test_runway_says_why_it_is_missing_when_nothing_was_spent(ontology):
+    kpis = {**PAYLOADS[f"/api/v1/clients/{CLIENT}/wallet/kpis"]}
+    kpis["data"] = {**kpis["data"], "runwayMonths": None, "consumedThisMonth": "0"}
+    fake = FakeBff({f"/api/v1/clients/{CLIENT}/wallet/kpis": (200, kpis)})
+    view = asyncio.run(agency_wallet(client_for(fake), TOKEN, CLIENT, with_managers=False))
+    answer = wallet_answer("wallet.explain_runway", "how long will my budget last", view, ontology)
+    assert "Runway isn't calculated: nothing has been spent this month" in answer.template
+
+
+
+def test_one_manager_is_one_manager(ontology):
+    """ "across 1 managers" - live QA, a partner with a single campaign manager."""
+    from genie.data.wallet import LiveFact, Manager, WalletView
+    from genie.router.live_answers import wallet_answer
+    view = WalletView(facts=[LiveFact("sub_wallet_total", "Team sub-wallets", 0, "₹0", None, "test")],
+                      managers=[Manager("Neha", None, None, None)], manager_count=1)
+    text = wallet_answer("wallet.explain_balance", "wallet overview", view, ontology).template
+    assert "Team sub-wallets hold ₹0 across 1 manager —" in text

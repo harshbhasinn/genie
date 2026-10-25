@@ -49,7 +49,7 @@ def events(response) -> list[tuple[str, dict]]:
 def test_health_reports_real_state(client):
     body = client.get("/healthz").json()
     assert body["status"] == "ok"
-    assert body["ontology"]["capabilities"] == 49
+    assert body["ontology"]["capabilities"] == 57
     assert body["config"]["bff_mode"] in ("token", "admin")
     assert "gemini_api_key" not in json.dumps(body).lower()  # no secret leaks
 
@@ -114,7 +114,7 @@ def test_navigation_never_calls_the_model(client):
     evs = events(r)
     nav = [d for n, d in evs if n == "block" and d["type"] == "navigate"]
     assert len(nav) == 1
-    assert nav[0]["content"] == "/wallet"
+    assert nav[0]["content"] == "/wallet-management"
     assert nav[0]["meta"]["screen_id"] == "wallet_management"
     assert not [d for n, d in evs if n == "block" and d["type"] == "token"]
 
