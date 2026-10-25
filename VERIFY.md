@@ -10,7 +10,7 @@ appear on its 200 response? The spec answers this, and this tool runs it on ever
 **Live** — does an `AD_PARTNER` token get a 200? Is the data non-empty? Does suppression
 fire? Only a real call answers that, and every one of those calls is listed below.
 
-**94 metrics.** 57 pass the static check, 0 fail it, 0 name no field at all.
+**94 metrics.** 61 pass the static check, 0 fail it, 0 name no field at all.
 
 ---
 
@@ -91,13 +91,14 @@ live response, and one response clears the whole group.
 - [ ] `share_of_voice` — grid is an untyped array in the spec. Whether it carries a zone or daypart axis is unknown until a real response is read.
 - [ ] `targeting_capable_screens` — deviceVariant appears in the endpoint's own summary but not in its response schema - the row type is anonymous, so the spec cannot confirm it. Read a live response.
 - [ ] `targeting_capable_share` — deviceVariant appears in the endpoint's own summary but not in its response schema - the row type is anonymous, so the spec cannot confirm it. Read a live response.
+- [ ] `top_brands` — revenue appears in the endpoint's own summary but not in its response schema - the row type is anonymous, so the spec cannot confirm it. Read a live response.
 
 ---
 
 ## Tier 4 · The sweep
 
 Everything else. One call per endpoint clears every metric under it, so this is
-**20 calls**, not 94.
+**25 calls**, not 94.
 
 | Endpoint | Clears | Read these fields |
 |---|---|---|
@@ -116,7 +117,12 @@ Everything else. One call per endpoint clears every metric under it, so this is
 | `GET /api/v1/analytics/devices/{deviceId}/uptime` | 2 metric(s) | `buckets`, `device`, `summary` |
 | `GET /api/v1/client-rate-cards` | 2 metric(s) | `imageCpm`, `videoCpm` |
 | `POST /api/v1/campaigns/availability-search` | 1 metric(s) | `cities`, `split`, `totalCount` |
+| `GET /api/v1/campaign-analytics/{campaignId}/impressions` | 1 metric(s) | `totalImpressions` |
+| `GET /api/v1/campaign-analytics/{campaignId}/reach` | 1 metric(s) | `totalDeliverableReach` |
+| `GET /api/v1/campaign-analytics/{campaignId}/spend` | 1 metric(s) | `spendForRange` |
 | `GET /api/v1/campaign-oversight/campaigns/{campaignId}/metrics` | 1 metric(s) | `totalScreens` |
+| `GET /api/v1/campaigns` | 1 metric(s) | `campaigns`, `store` |
+| `GET /api/v1/campaign-analytics/{campaignId}/impressions/gender` | 1 metric(s) | `genders`, `label`, `sharePct` |
 | `GET /api/v1/store-overview/{clientId}/location-distribution` | 1 metric(s) | `cities`, `denominator`, `totalScreens` |
 | `GET /api/v1/revenue-breakdown/{apId}/managers/{managerId}` | 1 metric(s) | `label`, `month`, `months`, `revenue` |
 | `GET /api/v1/clients/{clientId}/wallet/balance` | 1 metric(s) | `apRemaining`, `balance`, `kpis`, `wallet` |
