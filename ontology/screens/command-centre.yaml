@@ -6,7 +6,7 @@ screen:
   audience: [AD_PARTNER_ADMIN, CAMPAIGN_MANAGER]
   source_frame: "Agency Admin Dashboard (1.5).docx — image1 (admin), image11 (campaign manager)"
   purpose: >
-    The agency's home. Network scale and audience, how revenue splits between the two selling
+    Your home screen. Network scale and audience, how revenue splits between the two selling
     motions, delivery and pricing, business health (money in, owed, kept), and where the screens
     and demand are concentrated.
   entities: [client, brand, campaign, device, wallet]
@@ -85,6 +85,7 @@ screen:
           R12 - this is the window-UNIQUE figure, de-duplicated across the window. Divide by windowDays for a daily rate; never multiply a daily rate up to a month, which double-counts returning visitors.
       status: blocked
       blocked_by: [R7, R33]
+      unavailable_note: "Network-wide addressable reach is a store-owner figure. You can only ever see who saw your own creatives, and only as a best-single-day number."
       blocked_note: >
         Network-wide addressable reach is a store-owner figure. An ad partner can only ever see who saw its own creatives, and only as a best-single-day number.
 
@@ -272,16 +273,22 @@ screen:
         scope_key: client_id
         field: "runwayMonths"
       label: Wallet runway
-      definition: How many days the current balance lasts at the recent burn rate.
-      formula: "balance ÷ burn per day"
-      unit: days
+      definition: How many months the main wallet's balance lasts at the recent rate of spending.
+      formula: "main wallet balance ÷ recent monthly spend, calculated by the dashboard"
+      unit: months
       freshness: live
       deck_value: "~6 days (burn ₹2.6L/day)"
+      user_notes:
+        - "Not calculated when nothing has been spent this month - there is no rate to project from."
       gotchas:
         - >
           POLICY 2026-09-24 - resolved in favour of the API/backend over the design. See RESOLUTION-POLICY.md.
           Backend computes runwayMonths and lowBalance. Check the unit before quoting.
         - "Drives the wallet_runway advisor. Threshold is config, not a literal."
+        - >
+          API 2026-10-23 (API over design) - runwayMonths is MONTHS, and is null when nothing
+          has been spent this month: with no spending there is no rate to project from. The
+          deck's "~6 days" is the design, not the data.
       status: pending_verification
 
     - id: gross_billing
@@ -314,7 +321,7 @@ screen:
           from: required
           to: required
       label: Gross Profit
-      definition: What the agency keeps after AdGrid's platform cost.
+      definition: What you keep after AdGrid's platform cost.
       formula: "gross billing − platform cost; margin = gross profit ÷ gross billing"
       unit: currency_inr
       freshness: live
@@ -333,7 +340,7 @@ screen:
         scope_key: client_id
         field: "adgridRevenue, with unpaid for the outstanding part"
       label: Platform Invoice
-      definition: What AdGrid bills the agency this cycle — revenue-share plus screen rental.
+      definition: What AdGrid bills you this cycle — revenue-share plus screen rental.
       formula: "RevShare consumption + screen rental"
       unit: currency_inr
       freshness: live
@@ -389,6 +396,9 @@ screen:
       freshness: unknown
       label: Monthly Spot Inventory — Utilised
       deck_value: "56% Utilised · 22M Available"
+      user_notes:
+        - >
+          Loop capacity differs by tier - 120s premium, 60s standard - so a slot means different things on each.
       gotchas:
         - >
           Utilisation is one minus free over total, and image and video are separate ladders - combining them needs the sold mix and should be labelled.
@@ -396,8 +406,6 @@ screen:
           loopTiers gives maxImage and maxVideo per loop length, so a slot on a 120s premium screen is not the same unit as one on a 60s standard screen.
         - >
           POLICY 2026-09-24 - definition taken from the deck's annotation card, with the backend's vocabulary where they differ. See RESOLUTION-POLICY.md.
-        - >
-          Loop capacity differs by tier - 120s premium, 60s standard - so a slot means different things on each.
       status: pending_verification
 
     - id: targeting_capable_share
@@ -416,13 +424,14 @@ screen:
       freshness: unknown
       label: Targeting Capable | Camera + Intelligence
       deck_value: "86% · 21M Available"
+      user_notes:
+        - >
+          This is the pool a Targeted campaign can serve into.
       gotchas:
         - >
           R31 - the design defines targeting-capable as 'has a camera'. The API's own targeting path counts NON_PREMIUM devices instead: targeted-rate-check reports noInventoryCells as 'cells this client holds no NON_PREMIUM devices in'. Until someone confirms the two sets are identical, Genie says which it counted.
         - >
           POLICY 2026-09-24 - definition taken from the deck's annotation card, with the backend's vocabulary where they differ. See RESOLUTION-POLICY.md.
-        - >
-          This is the pool a Targeted campaign can serve into.
       status: pending_verification
 
     - id: broadcasting_revenue
@@ -431,15 +440,17 @@ screen:
       freshness: live
       label: Broadcasting
       deck_value: "₹2.21 Cr (80% of revenue) · collected ₹1.6 Cr · outstanding ₹0.61 Cr · CPM ₹95 · utilisation 56% · 31 campaigns"
+      user_notes:
+        - >
+          Broadcasting reserves slots on chosen screens. The other motion, Targeted, is an auction.
       gotchas:
         - >
           RevenueBreakdownResponse gives kpis, brands and monthlyTrend - no split by selling motion, so reserved share-of-voice revenue cannot be separated out.
         - >
           POLICY 2026-09-24 - definition taken from the deck's annotation card, with the backend's vocabulary where they differ. See RESOLUTION-POLICY.md.
-        - >
-          Broadcasting reserves slots on chosen screens. The other motion, Targeted, is an auction.
       status: blocked
       blocked_by: [R7]
+      unavailable_note: "Revenue comes back as one number. Nothing on this surface splits it by broadcasting versus targeted."
       blocked_note: >
         Revenue comes back as one number. Nothing on this surface splits it by broadcasting versus targeted.
 
@@ -449,15 +460,17 @@ screen:
       freshness: live
       label: Targeted
       deck_value: "₹0.55 Cr · collected ₹0.40 Cr · outstanding ₹0.15 Cr · clearing CPM ₹201 · fill/win 38% · 11 campaigns"
+      user_notes:
+        - >
+          Postpaid - nothing is charged at confirm, unlike Broadcasting.
       gotchas:
         - >
           RevenueBreakdownResponse gives kpis, brands and monthlyTrend - no split by selling motion, so auction revenue cannot be separated out.
         - >
           POLICY 2026-09-24 - definition taken from the deck's annotation card, with the backend's vocabulary where they differ. See RESOLUTION-POLICY.md.
-        - >
-          Postpaid - nothing is charged at confirm, unlike Broadcasting.
       status: blocked
       blocked_by: [R7]
+      unavailable_note: "Revenue comes back as one number. Nothing on this surface splits it by broadcasting versus targeted."
       blocked_note: >
         Revenue comes back as one number. Nothing on this surface splits it by broadcasting versus targeted.
 
@@ -483,13 +496,14 @@ screen:
       freshness: unknown
       label: Won & filled
       deck_value: "0.9 M/day · 38% fill"
+      user_notes:
+        - >
+          Fill rate is this divided by matched avails.
       gotchas:
         - >
           No endpoint in the BFF returns this. It is an auction-side measure, and the auction is not exposed on this surface at all - see RESOLUTION-POLICY.md: the BFF serves configuration and commerce well, and delivery measurement for ad partners not at all.
         - >
           POLICY 2026-09-24 - definition taken from the deck's annotation card, with the backend's vocabulary where they differ. See RESOLUTION-POLICY.md.
-        - >
-          Fill rate is this divided by matched avails.
       status: blocked
       blocked_by: [R7]
       blocked_note: >
@@ -537,13 +551,14 @@ screen:
       freshness: unknown
       label: Intelligence Efficiency
       deck_value: "97% · person detection F1 96.8% · age/gender 92.4% · attention/gaze 94.1% · impression verification 96.2% · targeting-capable 32,000/50k"
+      user_notes:
+        - >
+          Detection, classification and discard all happen on the screen; no images or identities leave it.
       gotchas:
         - >
           A composite of detection, classification and attention accuracy. Nothing returns any of the three, let alone the blend.
         - >
           POLICY 2026-09-24 - definition taken from the deck's annotation card, with the backend's vocabulary where they differ. See RESOLUTION-POLICY.md.
-        - >
-          Detection, classification and discard all happen on the screen; no images or identities leave it.
         - >
           The panel carries a privacy statement: "Detected, classified & discarded on the box —
           no images or identities leave the screen." Genie should be able to repeat this accurately;
@@ -578,7 +593,7 @@ screen:
         method: GET
         scope_key: client_id
         field: "overviewStats.brandCount"
-      definition: "Brands under this agency."
+      definition: "Your brands."
       unit: count
       freshness: live
       label: Brands managed
@@ -621,18 +636,19 @@ screen:
         method: POST
         scope_key: client_id
         field: "grid, against loopTiers capacity"
-      definition: "Share of each loop this agency's campaigns occupy, averaged across screen sections."
+      definition: "Share of each loop your campaigns occupy, averaged across screen sections."
       unit: percent
       freshness: unknown
       label: Share of voice
       deck_value: "62% · avg across sections"
+      user_notes:
+        - >
+          A client's share of a screen is fixed when its contract starts - clients never compete for the same slots.
       gotchas:
         - >
           Share of voice is this client's slots over the loop's capacity. A client's share of a screen is fixed when its contract starts - clients never compete for the same slots, so this does not move with anyone else's buying.
         - >
           POLICY 2026-09-24 - definition taken from the deck's annotation card, with the backend's vocabulary where they differ. See RESOLUTION-POLICY.md.
-        - >
-          A client's share of a screen is fixed when its contract starts - clients never compete for the same slots.
       status: pending_verification
 
     - id: audience_profile
@@ -646,23 +662,23 @@ screen:
         - >
           CONTRACT v3.1 SECTION 5 - /dashboard/audience is scoped by the STORE OWNER and serves a NETWORK_PARTNER only. 'The ad-partner and LESSPAY_MERCHANT dashboards are separate products. The columns exist so those can reuse this data later, but nothing here serves them.' An agency owns no stores, so this endpoint is not available to it. This reverses the 2026-09-24 reading that clientId on AudienceDashboardRequest meant agency scope - the request field is shared, the column the backend applies it to is not.
         - >
-          R15 still holds for whoever does get this: four opaque bucket keys, now labelled 18-25, 26-35, 36-50 and 51+, rendered exactly as returned and never re-bucketed.
+          R15 still holds for whoever does get this: the AgeGroup keys (18-24, 25-34, 35-44, 45-54, 55-64 and 65+, since 2026-10-21), rendered exactly as returned and never re-bucketed.
         - >
-          PARTIAL ALTERNATIVE - /dashboard/content returns dwellByCohortZone, keyed '<ageBucket>|<gender>' such as '26-35|F'. That exposes the same demographic axes to an agency, but as DWELL SECONDS per cohort per zone, not as a share of people. It answers 'which cohorts engaged with my creatives', not 'who is in front of the screens'. It is also SPARSE: an absent pair means no data, never zero.
+          PARTIAL ALTERNATIVE - /dashboard/content returns dwellByCohortZone, keyed '<ageBucket>|<gender>' such as '25-34|F'. That exposes the same demographic axes to an agency, but as DWELL SECONDS per cohort per zone, not as a share of people. It answers 'which cohorts engaged with my creatives', not 'who is in front of the screens'. It is also SPARSE: an absent pair means no data, never zero.
         - >
           R15 - reporting bands are whatever keys the API returns, rendered exactly as returned. Never re-bucket them into the wizard's five targeting bands.
         - >
           suppressed is a real state and means suppressed, never zero. When it is true, reason says why - the k-anonymity floor is 10.
         - >
           POLICY 2026-09-24 - resolved in favour of the API/backend over the design. See RESOLUTION-POLICY.md.
-          Reporting uses the API's four opaque bucket keys, rendered exactly as returned. Targeting's five bands are a separate concept.
+          Reporting uses the API's AgeGroup keys, rendered exactly as returned. Targeting's five bands are a separate concept.
         - >
-          R15 - the backend ships FOUR age buckets (18-25, 26-35, 36-50, 50+) while this screen
-          shows FIVE (18-24, 25-34, 35-44, 45-54, 55+). Different count and different boundaries.
+          R15 - the backend ships SIX age groups since 2026-10-21 (18-24, 25-34, 35-44, 45-54, 55-64 and 65+) while this screen
+          shows FIVE (18-24, 25-34, 35-44, 45-54, 55+). The first four now match; the design's 55+
+          is the backend's 55-64 and 65+ together.
         - >
-          Bucket keys are OPAQUE STRINGS. "50+" actually holds 51+ (first match wins, so a
-          50-year-old lands in 36-50). A relabel to "51+" is planned. Never parse a bucket label
-          to infer its range.
+          Bucket keys are OPAQUE STRINGS. Never parse a bucket label to infer its range; a batch that
+          writes a key outside the AgeGroup labels makes that band read 0.
       status: blocked
       blocked_by: [R7]
       blocked_note: >
@@ -726,11 +742,12 @@ screen:
       unit: percent
       freshness: unknown
       deck_value: "Morning (6a–12p) 48% · Afternoon (12–5p) 61% · Evening (5–10p) 78% · Night (10p–6a) 39%"
+      user_notes:
+        - >
+          A daypart stays bookable until it ends, so today's later dayparts are usually still sellable.
       gotchas:
         - >
           Same untyped-grid caveat as fill_rate_by_section. Dayparts are MORNING 10-13, AFTERNOON 13-16, EVENING 16-19, NIGHT 19-22.
-        - >
-          A daypart stays bookable until it ends, so today's later dayparts are usually still sellable.
         - >
           POLICY 2026-09-24 - resolved in favour of the API/backend over the design. See RESOLUTION-POLICY.md.
           Bands are 10-13 / 13-16 / 16-19 / 19-22 over a 10:00-22:00 day. The Command Centre chart is being corrected.

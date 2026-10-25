@@ -8,7 +8,7 @@ from functools import lru_cache
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from pydantic import Field, SecretStr, field_validator
+from pydantic import SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -47,6 +47,14 @@ class Settings(BaseSettings):
     # Hidden reasoning tokens per call; 0 = off. Unset (the default) sends nothing,
     # so the model's own default applies - some models reject the setting outright.
     genie_llm_thinking_budget: int | None = None
+    # For models that take a thinking LEVEL (Gemini 3.5: minimal, low, medium, high;
+    # minimal is the floor - it cannot be turned off). Wins over the budget when set.
+    genie_llm_thinking_level: str = ""
+
+    # Who writes the sentence under a live card. "template": code (cannot invent a
+    # number or a screen; free; instant). "model": the LLM rephrases the same facts,
+    # and anything with a number not on the card falls back to the template.
+    genie_live_wording: str = "template"
 
     @field_validator("genie_llm_thinking_budget", mode="before")
     @classmethod
@@ -70,7 +78,7 @@ class Settings(BaseSettings):
     # ── pgvector (not used until end of S2) ────────────────────────────
     genie_pg_dsn: SecretStr = SecretStr("")
 
-    @field_validator("genie_llm_provider", "genie_bff_mode", "genie_env")
+    @field_validator("genie_llm_provider", "genie_bff_mode", "genie_env", "genie_live_wording")
     @classmethod
     def _lower(cls, v: str) -> str:
         return v.strip().lower()
@@ -81,6 +89,13 @@ class Settings(BaseSettings):
         # "local" is the only environment that may read a token from secrets/.
         if v not in ("local", "qa", "prod"):
             raise ValueError("GENIE_ENV must be 'local', 'qa' or 'prod'")
+        return v
+
+    @field_validator("genie_live_wording")
+    @classmethod
+    def _known_wording(cls, v: str) -> str:
+        if v not in ("template", "model"):
+            raise ValueError("GENIE_LIVE_WORDING must be 'template' or 'model'")
         return v
 
     @field_validator("genie_bff_mode")

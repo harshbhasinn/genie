@@ -10,6 +10,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 
+from ..roles import access
+
 
 class Status(str, Enum):
     VERIFIED = "verified"
@@ -50,9 +52,12 @@ class Metric:
     unit: str | None = None
     freshness: str | None = None
     source: Source | None = None
+    # Written for users: the only notes a user, or a model, is ever given.
+    user_notes: tuple[str, ...] = ()
+    # Written for engineers: rulings, contract detail, advice to Genie. Never shown.
     gotchas: tuple[str, ...] = ()
     blocked_by: tuple[str, ...] = ()
-    blocked_note: str | None = None
+    unavailable_note: str | None = None      # for users: the only "why not" a model is given
 
     @property
     def servable(self) -> bool:
@@ -86,7 +91,7 @@ class Screen:
     actions: tuple[Action, ...] = ()
 
     def visible_to(self, role: str) -> bool:
-        return role in self.audience
+        return access(role) in self.audience
 
 
 @dataclass(frozen=True, slots=True)
@@ -156,10 +161,15 @@ class Capability:
     def writes(self) -> bool:
         return self.execution.state_changing
 
+    def role_allowed(self, roles: frozenset[str]) -> bool:
+        """Whether any of these roles - or the role whose access it shares - may use it."""
+        return not self.authorization.roles or bool(
+            set(self.authorization.roles) & {access(r) for r in roles})
+
     def permitted_for(self, roles: frozenset[str], permissions: frozenset[str]) -> bool:
         """Role and permission gating. Code, never a prompt instruction."""
         auth = self.authorization
-        if auth.roles and not (set(auth.roles) & roles):
+        if not self.role_allowed(roles):
             return False
         if auth.gate == "PERMISSION" and auth.permission:
             return auth.permission in permissions

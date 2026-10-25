@@ -24,6 +24,7 @@ def build(settings: Settings) -> Provider | None:
             model=settings.genie_llm_model,
             embed_model=settings.genie_embed_model,
             thinking_budget=settings.genie_llm_thinking_budget,
+            thinking_level=settings.genie_llm_thinking_level or None,
         )
     raise LLMError(f"unknown GENIE_LLM_PROVIDER {provider!r} — "
                    f"add an adapter in genie/llm/ implementing Provider")

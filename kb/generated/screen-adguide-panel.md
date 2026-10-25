@@ -6,7 +6,7 @@ audience: [AD_PARTNER_ADMIN, CAMPAIGN_MANAGER]
 client_scope: null
 status: published
 owner: genie-build
-source_digest: 4e503b659964
+source_digest: d8969ac0cd5f
 verified_against: ontology/screens/adguide-panel.yaml
 effective_from: null
 effective_to: null
@@ -70,13 +70,13 @@ Credit this plan would consume, and what remains after.
 
 *unit: currency_inr · live*
 
+- Which wallet it draws from depends on the viewer: a campaign manager's own sub-wallet if their role has one, otherwise the main wallet.
+
 - POLICY 2026-09-24 - resolved in favour of the API/backend over the design. See RESOLUTION-POLICY.md. Reserve base x 1.18 on the AdGrid-to-AdPartner leg. Show nothing for Targeted - it is postpaid.
 
 - MUST BE base x 1.18. The wallet pays leg 1 (AdGrid to AdPartner) PLUS 18% GST - the coverage check is balance >= adgridCost x 1.18. Quoting the base alone understates it.
 
 - MUST NOT APPEAR AT ALL for a Targeted campaign - those are postpaid, and nothing is charged at confirm.
-
-- Which wallet it draws from depends on the viewer: a campaign manager's own sub-wallet if their role has one, otherwise the agency wallet.
 
 ### Headroom
 

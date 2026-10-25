@@ -127,6 +127,47 @@ We need this for S2 (skeleton) and S4 (live data), alongside a seeded test tenan
 
 ---
 
+## 7 · Campaign analytics — which of impressions, reach and spend are measured?
+
+AdGuide now answers "how is my campaign doing?" from `GET /api/v1/campaign-analytics/{campaignId}/`
+`impressions`, `/reach` and `/spend`. Read from the contract alone:
+
+| Endpoint | Field AdGuide reads | What we concluded | Why |
+|---|---|---|---|
+| `/impressions` | `totalImpressions` | **measured** plays | per-day series that can vary |
+| `/reach` | `totalDeliverableReach` | **the plan** — audience the booked screens and slots are expected to reach | the name, and one flat `dailyReach` |
+| `/spend` | `spendForRange` | **the cost schedule** — `totalCost` spread evenly by day | one flat `dailySpend` |
+
+So AdGuide says "booked to reach about N people" and "it cost ₹X", never "reached" or "spent".
+**Please confirm — or tell us which of these is actually measured.** Also: how fresh is
+`totalImpressions` (real time, hourly, a daily batch)? AdGuide stamps every figure with its age.
+
+---
+
+## 8 · Wallet, invoices and approval rules — three contract questions
+
+**a. `/wallet/transactions` has no usable row type.** Its `transactions[]` is typed `Row`, and 16
+different responses share that one schema name (springdoc keeps the first), so the spec shows
+member-wallet fields (`brandsManaged`, `totalSpent`, …) for a transaction. AdGuide reads the
+ledger from `GET /wallet/statement` instead, whose `WalletStatementLine` is typed.
+- [ ] Give the inner `Row` classes distinct names (or `@Schema(name=…)`) so each is documented
+- [ ] Confirm `/wallet/statement` and `/wallet/transactions?tab=All` list the same entries
+
+**b. Date formats.** `from`/`to` on `spending-analysis` and `statement`, `fromMonth`/`toMonth` on
+`consumption/monthly` and `months` on `settlements` are untyped strings. AdGuide sends
+`YYYY-MM-DD` and `YYYY-MM` — and only when the user names a period; otherwise it sends none and
+echoes the window the response returns. **Please confirm the formats.**
+
+**c. Is `/wallet/settlements/summary` live for agencies?** The AdOps console says it is "still gated
+behind a feature flag". When it is refused, AdGuide answers "what do I owe" from the last three
+months of `/wallet/settlements` (`grandTotals.unpaid`).
+
+**d. Can an agency read `GET /api/v1/approval-configs`?** It is not client-scoped. AdGuide uses it
+only for who approves each stage; if it is refused, the answer gives the deadline and the timeout
+behaviour from `/clients/{clientId}/approval-automation` and leaves approvers out.
+
+---
+
 ## Already answered from the contracts — listed so you can correct us
 
 | | What we concluded | From |

@@ -18,11 +18,12 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 
+from ..data.approvals import REFERENCE
 from ..llm.base import LLMError, Message, Provider
 from ..ontology import Ontology
-from ..ontology.models import Capability, Mode, Status
+from ..ontology.models import Capability, Mode
 from .embeddings import CapabilityIndex
-from .lexical import LexicalIndex, cue_modes, is_question
+from .lexical import LexicalIndex, cue_modes, is_question, tokens
 
 log = logging.getLogger(__name__)
 
@@ -45,6 +46,7 @@ MIN_CONFIDENCE = 0.55
 # an uncontested weak match looks decisive and is not. Below this, the model
 # gets to veto, and answering 0 (none of these) is a valid outcome.
 LONE_CANDIDATE_FLOOR = 0.78
+REFERENCE_SCORE = 0.8               # clears the lone floor when the words matched no approvals answer
 # Capabilities whose home screen the user is already on get this much of a nudge.
 CONTEXT_BOOST = 0.05
 # And capabilities whose MODE matches the shape of the request get this much.
@@ -104,12 +106,11 @@ class IntentRouter:
                     permissions: frozenset[str]) -> bool:
         """Can this user actually use it? Ranking, not filtering.
 
-        UNKNOWN is still not DENIED: until S4 wires /api/v1/me there is no
-        permission set at all, and an empty one must mean "not asked yet".
+        UNKNOWN is still not DENIED: an empty permission set - no /api/v1/me read, or
+        a vocabulary the catalog does not use - must mean "not asked yet".
         """
-        if roles and cap.authorization.roles:
-            if not (set(cap.authorization.roles) & roles):
-                return True
+        if roles and not cap.role_allowed(roles):
+            return True
         if permissions and cap.authorization.gate == "PERMISSION":
             if cap.authorization.permission:
                 return cap.authorization.permission not in permissions
@@ -209,9 +210,16 @@ class IntentRouter:
                     roles: frozenset[str] = frozenset(),
                     permissions: frozenset[str] = frozenset()) -> Route:
 
+        # A request reference names WHICH request, not what is asked about it, so the
+        # words are routed with the reference read as what it is: "what changed in
+        # REQ-1136" -> "what changed in this request". The responder still reads the
+        # reference from the full text to pick the request.
+        referenced = bool(REFERENCE.search(text))
+        words = REFERENCE.sub("this request", text) if referenced else text
+
         # L-1 — exact. Deterministic, and the only rung the golden set can
         # assert on without a network.
-        exact = self._ontology.exact_utterance(text)
+        exact = self._ontology.exact_utterance(words)
         if exact is not None:
             denied = self._denied_for(exact, roles, permissions)
             return Route(exact, 1.0, "exact",
@@ -224,10 +232,20 @@ class IntentRouter:
         cues = cue_modes(text)
         interrogative = is_question(text)
         lex = [(h.capability_id, h.score, "lexical")
-               for h in self._lexical.search(text)]
-        named, strength = self._names_a_metric(text, screen)
+               for h in self._lexical.search(words)]
+        named, strength = self._names_a_metric(words, screen)
         if named is not None and not (cues & {"navigate", "handoff", "plan"}):
             lex.append(("explain.metric", strength, "metric-name"))
+        # The reference still says the question is about a request: approvals answers
+        # the words matched are lifted, and if the words matched none, its status is
+        # what is being asked ("where is REQ-1136"). An action on it is left to the words.
+        if referenced and not tokens(REFERENCE.sub(" ", text)):
+            # The reference alone ("REQ-1136"): there is nothing to ask but where it stands.
+            lex = [("approvals.request_status", REFERENCE_SCORE, "reference")]
+        elif referenced and not (cues & {"handoff"}):
+            lex = [(c, sc + CUE_BOOST if c.startswith("approvals.") else sc, v) for c, sc, v in lex]
+            if not any(c.startswith("approvals.") for c, _, _ in lex):
+                lex.append(("approvals.request_status", REFERENCE_SCORE, "reference"))
         ranked = self._rank(lex, screen=screen, roles=roles, permissions=permissions,
                             cues=cues, interrogative=interrogative)
 

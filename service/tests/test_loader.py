@@ -20,12 +20,13 @@ def ontology():
 def test_loads_the_real_ontology(ontology):
     stats = ontology.stats
     assert stats["screens"] == 12
-    assert stats["capabilities"] == 49
+    assert stats["capabilities"] == 57
     # 256: the 2026-09-29 ruling moved "what's my utilisation" to explain.metric,
     # and 11 more phrasings were added where capabilities had real coverage gaps.
     # 260: the AdGuide chip "explain my wallet position" and three overview phrasings
-    # on wallet.explain_balance (it was routing to navigate.wallet).
-    assert stats["utterances"] == 260
+    # on wallet.explain_balance (it was routing to navigate.wallet). 343: the live
+    # capabilities - campaigns, approvals, spending, invoices - and their phrasings.
+    assert stats["utterances"] == 343
     assert stats["metrics"] > 90
 
 

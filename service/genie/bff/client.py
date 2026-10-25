@@ -16,6 +16,7 @@ Four rules, each one a past incident somewhere:
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from dataclasses import dataclass
@@ -34,7 +35,8 @@ class BffError(Exception):
     def __init__(self, kind: str, message: str, *, status: int | None = None,
                  endpoint: str | None = None):
         super().__init__(message)
-        self.kind = kind            # signed_out | forbidden | not_found | unavailable | bad_response
+        # signed_out | forbidden | not_found | rejected | unavailable | bad_response
+        self.kind = kind
         self.status = status
         self.endpoint = endpoint    # the path TEMPLATE, never the filled-in path
 
@@ -70,6 +72,23 @@ class BffClient:
     async def close(self) -> None:
         await self._client.aclose()
 
+    async def get_all(self, token: str | None, reads: dict[str, dict]
+                      ) -> tuple[dict[str, dict], dict[str, str]]:
+        """Several reads at once, keyed by template: (data for those that answered,
+        BffError kind for those that did not). One failure never sinks the others."""
+        results = await asyncio.gather(*(self.get(t, token=token, **kw) for t, kw in reads.items()),
+                                       return_exceptions=True)
+        got: dict[str, dict] = {}
+        problems: dict[str, str] = {}
+        for template, res in zip(reads, results):
+            if isinstance(res, BffError):
+                problems[template] = res.kind
+            elif isinstance(res, BaseException):
+                problems[template] = "unavailable"
+            else:
+                got[template] = res.data or {}
+        return got, problems
+
     async def get(self, template: str, *, token: str | None,
                   path_params: dict[str, str] | None = None,
                   params: dict[str, Any] | None = None) -> BffResponse:
@@ -99,7 +118,13 @@ class BffClient:
             raise BffError("forbidden", "not permitted for this user", status=403, endpoint=template)
         if resp.status_code == 404:
             raise BffError("not_found", "not found", status=404, endpoint=template)
-        if resp.status_code >= 400:
+        if 400 <= resp.status_code < 500:
+            # The request itself was refused (400, 422...): most likely OUR parameters,
+            # not the dashboard being down - so it is not reported as "unavailable".
+            log.warning("BFF refused the request: %s %s", resp.status_code, template)
+            raise BffError("rejected", f"the dashboard API refused the request ({resp.status_code})",
+                           status=resp.status_code, endpoint=template)
+        if resp.status_code >= 500:
             raise BffError("unavailable", f"the dashboard API answered {resp.status_code}",
                            status=resp.status_code, endpoint=template)
         try:

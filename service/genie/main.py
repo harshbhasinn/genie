@@ -71,7 +71,8 @@ async def lifespan(app: FastAPI):
     app.state.tokens = token_auth.build(cfg)
     app.state.bff = bff
     app.state.sessions = MemorySessionStore()
-    app.state.responder = Responder(ontology, provider, bff=bff)
+    app.state.responder = Responder(ontology, provider, bff=bff,
+                                    live_wording=cfg.genie_live_wording)
 
     log.info("ready on http://%s:%s | responder=%s | bff=%s",
              cfg.genie_host, cfg.genie_port, app.state.responder.mode,
@@ -88,7 +89,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Genie",
-    description="Read-only assistant for the AdGrid Ad Partner Agency Admin Dashboard.",
+    description="Read-only assistant for the AdGrid partner dashboard.",
     version="0.2.0",
     lifespan=lifespan,
 )

@@ -23,11 +23,16 @@ class Message:
 @dataclass(slots=True)
 class Usage:
     prompt_tokens: int = 0
-    output_tokens: int = 0
+    output_tokens: int = 0       # the visible answer
+    thinking_tokens: int = 0     # hidden reasoning - billed as output, and counts toward the cap
+
+    @property
+    def billed_output(self) -> int:
+        return self.output_tokens + self.thinking_tokens
 
     @property
     def total(self) -> int:
-        return self.prompt_tokens + self.output_tokens
+        return self.prompt_tokens + self.billed_output
 
 
 @dataclass(slots=True)

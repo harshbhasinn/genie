@@ -145,6 +145,7 @@
         "cpm_inr",
         "per_day",
         "days",
+        "months",
         "multiplier",
         "text"
       ]
@@ -286,6 +287,13 @@
         "source": {
           "$ref": "#/$defs/source"
         },
+        "user_notes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Notes written FOR USERS - the only notes Genie may tell a user or hand to a model. Gotchas are for engineers and are never shown."
+        },
         "gotchas": {
           "type": "array",
           "items": {
@@ -312,6 +320,10 @@
             "type": "string",
             "pattern": "^(R[0-9]{1,2}|D[0-9]{1,2}|B[0-9]{1,2}|N[0-9]{1,2})$"
           }
+        },
+        "unavailable_note": {
+          "type": "string",
+          "description": "Written FOR USERS: why the figure is not shown. The only unavailability text Genie may tell a user or hand to a model; blocked_note is for engineers."
         },
         "blocked_note": {
           "type": "string"

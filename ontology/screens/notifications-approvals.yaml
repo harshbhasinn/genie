@@ -2,7 +2,7 @@ screen:
   id: notifications_approvals
   kind: screen
   title: Campaign Approvals
-  route: /notifications/approvals
+  route: /notifications
   nav_label: Pending Approvals
   audience: [AD_PARTNER_ADMIN]
   source_frame: "Agency Admin Dashboard (1.5).docx - Notifications and Approval (image2)"

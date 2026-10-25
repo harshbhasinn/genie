@@ -194,6 +194,7 @@ capabilities:
     mutating: false
     utterances:
       - what is this page
+      - what is this screen
       - what can I do here
       - what am I looking at
       - explain this screen

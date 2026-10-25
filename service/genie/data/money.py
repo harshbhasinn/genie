@@ -62,6 +62,32 @@ def inr_short(amount: Decimal) -> str:
     return sign + inr(a)
 
 
+def count(n: int) -> str:
+    """12,34,567 — people and plays are grouped the Indian way too."""
+    return ("-" if n < 0 else "") + _indian_grouping(n)
+
+
+def count_of(n: int, word: str, plural: str | None = None) -> str:
+    """ "1 screen", "12 screens", "3 cities"."""
+    return f"{count(n)} {word if n == 1 else (plural or word + 's')}"
+
+
+def pct(d: Decimal) -> str:
+    """A share as the API returns it, to one decimal place: 65.5%, 70%."""
+    return f"{d.quantize(Decimal('0.1')).normalize():f}%"
+
+
+def count_short(n: int) -> str | None:
+    """12.35 L / 1.20 Cr, or None when the full figure is already short."""
+    a = Decimal(abs(n))
+    sign = "-" if n < 0 else ""
+    if a >= CRORE:
+        return f"{sign}{(a / CRORE).quantize(Decimal('0.01'))} Cr"
+    if a >= LAKH:
+        return f"{sign}{(a / LAKH).quantize(Decimal('0.01'))} L"
+    return None
+
+
 # ── the number check ────────────────────────────────────────────────────
 
 _NUMBER = re.compile(r"\d[\d,]*(?:\.\d+)?")

@@ -6,7 +6,7 @@ audience: [AD_PARTNER_ADMIN]
 client_scope: null
 status: published
 owner: genie-build
-source_digest: 77f8a5793227
+source_digest: 27796f296b7c
 verified_against: ontology/screens/wallet-management.yaml
 effective_from: null
 effective_to: null
@@ -18,9 +18,9 @@ effective_to: null
 
 # Wallet Management
 
-Billing, credits, sub-wallet allocations and payment history. The agency holds one wallet and each campaign manager holds a sub-wallet beneath it; campaigns are paid from whichever applies.
+Billing, credits, sub-wallet allocations and payment history. You hold one main wallet and each campaign manager holds a sub-wallet beneath it; campaigns are paid from whichever applies.
 
-**Where:** `/wallet`  
+**Where:** `/wallet-management`  
 **Who can see it:** AD_PARTNER_ADMIN
 
 
@@ -28,7 +28,7 @@ Billing, credits, sub-wallet allocations and payment history. The agency holds o
 
 ### Main Wallet Balance
 
-Prepaid credit held by the agency and available to allocate or spend.
+Prepaid credit you hold, available to allocate or spend.
 
 **How it is worked out:** `top-ups minus consumption minus allocations out`
 
@@ -46,11 +46,11 @@ Credit already allocated out to campaign managers' sub-wallets.
 
 *unit: currency_inr · live*
 
-- Committed, not spendable by the agency. Counting it as available is what makes the runway alert under-fire.
+- Already handed to campaign managers, so you can't spend it. Counting it as available makes the runway look longer than it is.
 
 ### This Month's Consumption
 
-Agency spend in the current month.
+Your spend in the current month.
 
 *unit: currency_inr · live*
 
@@ -80,7 +80,7 @@ Funding projected to be needed over the next 30 days at the recent spending rate
 
 ### Allocated
 
-Credit moved from the agency wallet into this manager's sub-wallet.
+Credit moved from the main wallet into this manager's sub-wallet.
 
 *unit: currency_inr · live*
 

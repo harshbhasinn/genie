@@ -6,7 +6,7 @@ audience: [AD_PARTNER_ADMIN, CAMPAIGN_MANAGER]
 client_scope: null
 status: published
 owner: genie-build
-source_digest: ba8204c217e3
+source_digest: b47ac93c813e
 verified_against: ontology/screens/inventory-management.yaml
 effective_from: null
 effective_to: null
@@ -18,9 +18,9 @@ effective_to: null
 
 # Screen Management
 
-The screens this agency can buy on - how many, where, what kind of shop they sit in, how full they already are, and what they cost. This is the pool the Planner allocates from.
+The screens you can buy on - how many, where, what kind of shop they sit in, how full they already are, and what they cost. This is the pool the Planner allocates from.
 
-**Where:** `/inventory`  
+**Where:** `/inventory-management`  
 **Who can see it:** AD_PARTNER_ADMIN, CAMPAIGN_MANAGER
 
 > The navigation calls this **Inventory Management** while the page heading reads **Screen Management**. Both names refer to the same screen.

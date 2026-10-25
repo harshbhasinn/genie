@@ -2,7 +2,7 @@ screen:
   id: launch_campaign
   kind: wizard
   title: Create Campaign
-  route: /brands/{brandId}/campaigns/new
+  route: /campaign/create-campaign/{brandId}
   nav_label: Create Campaign
   audience: [AD_PARTNER_ADMIN, CAMPAIGN_MANAGER]
   source_frame: "Agency Admin Dashboard (1.5).docx - Launch Campaign (image5), Campaign Manager variant (image13)"
@@ -266,10 +266,9 @@ screen:
           constraints: "Select one or more, or leave empty for all."
           gotchas:
             - >
-              R15: these five TARGETING bands differ from the four REPORTING buckets the analytics
-              API returns (18-25, 26-35, 36-50, 50+). They may legitimately differ - targeting is a
-              selection input, reporting comes from the rollup - but a user who targets 25-34 and
-              reads a report bucketed 26-35 will be confused. Unresolved.
+              R15: these five TARGETING bands and the REPORTING groups the analytics API returns (AgeGroup
+              since 2026-10-21: 18-24, 25-34, 35-44, 45-54, 55-64 and 65+) now share their first four boundaries; targeting's 55+ is
+              reporting's 55-64 and 65+. Say which is being shown when both appear.
           status: blocked
           blocked_by: [R15]
           blocked_note: "Targeting bands vs reporting bands - see R15 refinement, round 9."
@@ -421,6 +420,8 @@ screen:
       formula: "sum over cost cells of (device_count x rate x slots x days), with surcharges"
       unit: currency_inr
       freshness: live
+      user_notes:
+        - "Targeted campaigns are postpaid - nothing is charged at confirm."
       gotchas:
         - >
           adPartnerToBrandTotalCost is what the brand pays; adgridToAdPartnerTotalCost is the agency's own cost basis and is never surfaced. totalCost is the figure the plan card means.
@@ -431,7 +432,6 @@ screen:
         - >
           The wizard shows only the brand-facing leg ('Cost to Brand' / 'Base Amount'). The
           AdGrid-to-AdPartner per-cell breakdown is marked INTERNAL and must never be surfaced.
-        - "Targeted campaigns are postpaid - nothing is charged at confirm."
       verified_against: "CAMPAIGN_CREATION_GUIDE.md 10.1, 10.4; BillingSimulationServiceImpl"
       status: verified
 
@@ -445,10 +445,11 @@ screen:
       definition: Ad-views this selection is projected to deliver over the flight.
       unit: count
       freshness: live
+      user_notes:
+        - "Impressions are playback events, not people. Reach is the de-duplicated person count."
       gotchas:
         - >
           This counts SLOTS, which is plays, which is impressions as the platform defines them - R18, playback events and not people. It assumes every booked slot plays; downtime makes the real figure lower, which is what screen_uptime is for.
-        - "Impressions are playback events, not people. Reach is the de-duplicated person count."
       status: pending_verification
 
     - id: plan_daily_reach

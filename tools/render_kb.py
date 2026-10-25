@@ -92,7 +92,7 @@ def render_screen(doc: dict, src: str, digest: str = "") -> tuple[str, str]:
                 bits.append("live")
             if bits:
                 lines.append(f"*{' · '.join(bits)}*\n")
-            for g in m.get("gotchas") or []:
+            for g in (m.get("user_notes") or []) + (m.get("gotchas") or []):
                 lines.append(f"- {' '.join(g.split())}\n")
 
     if s.get("steps"):

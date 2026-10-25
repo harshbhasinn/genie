@@ -194,4 +194,4 @@ capabilities:
         There is no global creative library. It is always a brand's library, reached from the brand
         page - so a brand must be resolved before this route exists.
     status: verified
-    verified_against: "Ontology screen creative_library, route /brands/{brandId}/creatives"
+    verified_against: "Ontology screen creative_library, route /brand-management/library/{brandId}"
