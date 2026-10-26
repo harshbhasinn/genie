@@ -1,6 +1,11 @@
 # Progress — S0 to S11
 
-As of 2026-09-29. Measured from the repo, not estimated. **123 files.**
+As of 2026-10-26. Measured from the repo, not estimated.
+
+> **This branch is `s3/navigate-routes`, cut from `feat/live-data-path`.** The S4 rows below are
+> **not** updated: that branch carries a live data path (BFF client, auth, wallet/campaigns/
+> approvals/spending readers, ~1,800 lines of tests) which this branch builds on but has not
+> reviewed. Do not read S4 off this file until someone has.
 
 ---
 
@@ -9,9 +14,9 @@ As of 2026-09-29. Measured from the repo, not estimated. **123 files.**
 | S | Stage | State | Done | Blocker |
 |:--:|---|---|:--:|---|
 | **0** | Unblock | 🟢 **done** | **95%** | C2 · C3 · C4 — all access, no analysis left |
-| **1** | Ontology + catalog | 🟢 **done** | **100%** | none — every metric and capability is modelled or honestly blocked |
+| **1** | Ontology + catalog | 🟡 **reopened** | **~80%** | **the designs were a subset.** `GENIE1.md` §3 lists ~24 real routes; 12 are modelled. Missing: ShareGrid, Account Settings, Slot Rates, Help & Support, the Brand Manager console's other two tabs |
 | **2** | Skeleton | 🟢 **done** | **100%** | none — running, streaming, tested |
-| **3** | Navigate + Explain | 🟢 **done** | **96%** | none — 96% capability, 99% mode on the golden set |
+| **3** | Navigate + Explain | 🟢 **done** | **98%** | none — navigation now emits routes that exist and are complete (R34–R36) |
 | **4** | Data path | 🔴 not started | 0% | S3 · C4 |
 | **5** | **Reach model** | 🔴 **not started** | 0% | **C3 downgraded** — 4 additive fields on `/content`, no data grant |
 | **6** | Planner | 🔴 not started | 0% | S5 |
@@ -21,8 +26,26 @@ As of 2026-09-29. Measured from the repo, not estimated. **123 files.**
 | **10** | RAG | 🟡 scaffolded | 20% | **D3 corpus author · Tier A empty** |
 | **11** | Hardening | 🔴 not started | 0% | everything |
 
-**S0 to S3 are closed.** Everything after them waits on access — none on modelling, and none on
-another design review.
+**S0, S2 and S3 are closed. S1 reopened on 2026-10-26** — not because the modelling was wrong, but
+because the thing modelled was incomplete: the ontology was built from the Figma deck, and the deck
+is a subset of the console. See CONFLICTS.md, "navigation, from the frontend's own route registry".
+
+### 2026-10-26 — navigation fixed against the real route registry
+
+Nine of the twelve screen routes were fictional, invented from Figma frames. They were corrected on
+`feat/live-data-path`; this branch fixes what correcting them exposed and stops it recurring.
+
+| | Was | Now |
+|---|---|---|
+| **Routes** | `/inventory`, `/wallet`, `/team`, `/brands/{brandId}` … — 9 of 11 served nothing | every route checked against `ontology/routes.yaml`, transcribed from `src/segments/non-premium/routes.ts`; the build fails on a route the console does not serve, and on two screens claiming one |
+| **Placeholders** | `navigate_facts` returned `screen.route` verbatim, so users were sent to `/brand-management/{brandId}` | a route is filled from the panel's context or the user's own brands, or it is **not emitted** — a `navigate_needs` block says what is missing instead. 19 new tests, including a sweep that no turn ever streams a `{param}` |
+| **The list page** | "open brand management" asked "Which brand?" and then emitted a template | `/brand-management` **is** the list of brands. It opens. `entity_route` carries the per-brand page for when a brand is known |
+| **`brand_dashboard`** | owned Brand Management's route and asked, in its own notes, what it was | R34 — it is `BRAND_MANAGER`'s separate read-only console at `/brand-overview`. Question closed |
+| **Wallet, for a manager** | refused — gated on `VIEW_WALLET`, which a campaign manager lacks | R35 — the nav bar is ungated and every manager has a sub-wallet. The route opens; the account-level figures stay scoped |
+| **Approvals, for a manager** | screen refused | R36 — the **screen** is shared ("My requests"), the **queue capability** is not. Split, after a first attempt widened both and the colleague's own test caught it |
+| **Where it was pinned** | nowhere — the golden set never looked at a route | 4 new golden queries, a route registry in CI, and the basename contract in ARCHITECTURE.md §4.3b |
+
+Everything after S3 waits on access — none on modelling, and none on another design review.
 
 ### S3 · Navigate + Explain — 🟢 96%
 

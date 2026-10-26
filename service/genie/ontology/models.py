@@ -87,6 +87,10 @@ class Screen:
     purpose: str
     audience: tuple[str, ...]
     nav_label: str | None = None
+    # The per-entity form of `route`, when the screen has both. /brand-management
+    # lists brands, /brand-management/{brandId} is one of them. NAVIGATE uses this
+    # only once the entity is resolved.
+    entity_route: str | None = None
     metrics: tuple[Metric, ...] = ()
     actions: tuple[Action, ...] = ()
 

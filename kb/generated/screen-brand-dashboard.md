@@ -1,12 +1,12 @@
 ---
 doc_id: screen-brand-dashboard
-title: Brand Dashboard
+title: Brand Overview
 source_kind: generated
-audience: [CAMPAIGN_MANAGER, BRAND_MANAGER]
+audience: [BRAND_MANAGER]
 client_scope: null
 status: published
 owner: genie-build
-source_digest: 824b96556b0c
+source_digest: 6fdf03beae82
 verified_against: ontology/screens/brand-dashboard.yaml
 effective_from: null
 effective_to: null
@@ -16,9 +16,11 @@ effective_to: null
 > Change `ontology/screens/brand-dashboard.yaml` and re-run `python tools/render_kb.py`.
 
 
-# Brand Dashboard
+# Brand Overview
 
-A per-brand view that appears only in the Campaign Manager's navigation. Not present in the Media Partner Admin set.
+The landing tab of the Brand Manager's own read-only console. A brand's own people see their campaigns and their spend here; they do not get the partner console with pieces hidden.
 
-**Where:** `/brand-management/{brandId}`  
-**Who can see it:** CAMPAIGN_MANAGER, BRAND_MANAGER
+**Where:** `/brand-overview`  
+**Who can see it:** BRAND_MANAGER
+
+> The navigation calls this **Overview** while the page heading reads **Brand Overview**. Both names refer to the same screen.

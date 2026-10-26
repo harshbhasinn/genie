@@ -3,7 +3,9 @@
 Every contradiction found while transcribing the designs, in one place. Detail and evidence for each
 is in `S0-ANSWERS.md` (rounds 1–10); this is the index.
 
-**As of 2026-09-24.** 33 ids issued, R23 never assigned. R31 and R32 are new, from the live spec.
+**As of 2026-10-26.** 36 ids issued, R23 never assigned. R34–R36 are new, from the two
+knowledge-base hand-over documents (`GENIE1.md`, `ADGRID_KNOWLEDGE_BASE.md`), which rank above the
+designs under `RESOLUTION-POLICY.md` because they were read out of the code on `origin/main`.
 R25 is tracked here as resolved and as defect D4 — it is the same finding seen from both ends.
 
 | | Count |
@@ -68,6 +70,33 @@ deferred defect means the *product* ships something wrong to a user.
 | **D8** | ⏸️ **ON HOLD** — `PAUSE_CAMPAIGN`, `DELETE_CREATIVE`, `MARK_INVOICE_PAID` are declared but never enforced | F1 audit |
 | **D9** | ⏸️ **ON HOLD** — Add User "Inventory Access" / "Campaign Access" tick-boxes have no backend equivalent | F1 audit |
 | **D10** | 🔴 **NEW 2026-09-24 — three approval transitions exist in the API and in none of the designs.** `POST /approvals/{referenceCode}/send-back`, `/withdraw` and `/resubmit`. The deck models approval as approve-or-reject; the real flow has five moves, and two of them belong to the *maker*, not the checker. Now modelled in the ontology and catalog | live BFF spec |
+
+---
+
+## 2026-10-26 — navigation, from the frontend's own route registry
+
+`GENIE1.md` §3 reads out `src/segments/non-premium/routes.ts`. Checked against it, **nine of the
+twelve screen routes in this ontology were fictional** — invented from Figma frames. They were
+corrected on `feat/live-data-path`; these three rulings are what correcting them exposed.
+
+| | What | Ruled |
+|---|---|---|
+| **R34** | `brand_dashboard` carried `/brand-management/{brandId}` — **Brand Management's own route**, so two screens owned one page and NAVIGATE had two answers for it. The screen file itself asked whether it was "a distinct screen, or the Campaign Manager's rendering of Brand Management" | **Neither.** It is `BRAND_MANAGER`'s own read-only console — `/brand-overview`, `/brand-campaigns`, `/brand-account`, rendered by `BrandConsoleTabs` with its own navigation (GENIE1 §3, §2.2). Re-pointed at `/brand-overview`, audience narrowed to `BRAND_MANAGER`, and the open question closed |
+| **R35** | `navigate.wallet` was gated on `VIEW_WALLET`, which a `CAMPAIGN_MANAGER` does not hold — so Genie refused them Wallet Management | **Allow the route.** GENIE1 §3's nav table shows Wallet Management with **no gate**, and §8.5 gives every campaign manager a sub-wallet plus `members/me/wallet/request-topup`. `VIEW_WALLET` gates the **account-level figures on** the screen (measured on QA: 403 on all three partner pots), not the door. Gate changed to ROLE. This was the same mistake as treating blocked as unroutable |
+| **R36** | Should `navigate.approvals` admit a `CAMPAIGN_MANAGER`? D10 says two approval moves are the *maker's*, and GENIE1 §8.8 shows the inbox has two sides, "For me" and "My requests" | **Split the two.** The **screen** is shared — `/notifications` audience now includes `CAMPAIGN_MANAGER`. The **capability** is not: every one of its utterances asks what is awaiting a signature, and a campaign manager is never a checker. Widening it made the checker's queue reachable by someone who can never sign. The maker's side is `campaign.withdraw_request`, `campaign.resubmit_request` and `approvals.request_status`, which read `/approvals/mine`. *Caught by the colleague's own test, after the first attempt widened both.* |
+
+### Still open from the same reading
+
+- **`/brand-overview` has no capability.** The route and the screen are modelled; nothing navigates
+  there, so a Brand Manager asking for their overview is unroutable. Honest, and a gap.
+- **`/brand-campaigns` and `/brand-account`** are real routes, in `ontology/routes.yaml`, not
+  modelled as screens. Never seen.
+- **`/inventory-management/slot-rates`, `/premium-slot-rates`, `/account-settings`,
+  `/help-support`** are live, in the main nav, and have neither a screen nor a capability.
+- **ShareGrid** (`/sharegrid/*`) is an entire product surface with no model at all. Flag-gated
+  (`VITE_FEATURE_SHAREGRID` **and** API v2) and half its endpoints are not deployed on QA.
+- The golden set cannot express **"this should be unroutable"** — every query must name a catalog
+  capability, so the two cases above could not be pinned there and are recorded here instead.
 
 ---
 

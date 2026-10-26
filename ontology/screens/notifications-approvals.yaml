@@ -4,7 +4,7 @@ screen:
   title: Campaign Approvals
   route: /notifications
   nav_label: Pending Approvals
-  audience: [AD_PARTNER_ADMIN]
+  audience: [AD_PARTNER_ADMIN, CAMPAIGN_MANAGER]
   source_frame: "Agency Admin Dashboard (1.5).docx - Notifications and Approval (image2)"
   purpose: >
     Maker-checker. Campaigns created by campaign managers sit here until an admin authorises them

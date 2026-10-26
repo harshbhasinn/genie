@@ -4,7 +4,7 @@ screen:
   title: Wallet Management
   route: /wallet-management
   nav_label: Wallet Management
-  audience: [AD_PARTNER_ADMIN]
+  audience: [AD_PARTNER_ADMIN, CAMPAIGN_MANAGER]
   source_frame: "Agency Admin Dashboard (1.5).docx - Wallet Management (image8)"
   purpose: >
     Billing, credits, sub-wallet allocations and payment history. You hold one main wallet and each campaign manager holds a sub-wallet beneath it; campaigns are paid from whichever applies.

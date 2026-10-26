@@ -1,0 +1,62 @@
+# The ad-partner console's REAL route registry.
+#
+# Transcribed from GENIE1.md section 3, which reads it out of
+# src/segments/non-premium/routes.ts. This file exists because nine of the
+# twelve screen routes in this ontology were invented from Figma frames and
+# survived to a merge: the golden set scores capability, mode and follow-up,
+# and never once looked at the route Genie actually emitted. Deep-linking a
+# user into a 404 is a worse answer than refusing them.
+#
+# tools/validate_ontology.py checks every screen `route` and `entity_route`
+# against this list and fails the build on anything not here. Add a route here
+# only after reading it out of the frontend's own registry - not from a design.
+
+# Every route below is relative to this. react-router owns the prefix, so the
+# ontology stores routes WITHOUT it and whoever mounts the panel prepends it.
+# Recorded because Genie emits "/wallet-management" while the browser is at
+# "/agency/wallet-management", and the integration has to agree which it is.
+basename: /agency
+
+# The panel is an overlay on every route rather than a route of its own.
+overlay: "/*"
+
+routes:
+  - /command-centre
+
+  - /brand-management                              # the list of brands
+  - /brand-management/{brandId}                    # one brand's summary
+  - /brand-management/view-all-campaigns/{brandId}
+  - /brand-management/library/{brandId}            # a brand's creative library
+  - /brand-management/create-new-brand
+  - /brand-management/edit/{brandId}
+
+  - /campaign/{campaignId}
+  - /campaign/create-campaign/{brandId}
+
+  - /inventory-management
+  - /inventory-management/slot-rates
+  - /inventory-management/premium-slot-rates
+  - /inventory-management/{screenId}               # one screen's detail
+
+  - /team-management
+  - /team-management/{userId}
+
+  - /wallet-management
+  - /notifications
+  - /account-settings
+  - /profile
+  - /help-support
+
+  # ShareGrid - the resale programme. Gated on FEATURES.sharegrid, which is
+  # VITE_FEATURE_SHAREGRID=true AND VITE_API_VERSION>=2, and half its endpoints
+  # are not deployed on QA. Not modelled as screens yet; listed so a route
+  # pointing here is not rejected as fictional.
+  - /sharegrid
+  - /sharegrid/{tab}                               # overview|shared|resellers|revenue|settings
+  - /sharegrid/resellers/r/{resellerId}
+
+  # BRAND_MANAGER's own read-only console. A three-tab shell with its own
+  # navigation - not the partner console with pieces hidden.
+  - /brand-overview
+  - /brand-campaigns
+  - /brand-account

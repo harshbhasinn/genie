@@ -1,29 +1,37 @@
 screen:
   id: brand_dashboard
   kind: screen
-  title: Brand Dashboard
-  route: /brand-management/{brandId}
-  nav_label: Brand Dashboard
-  audience: [CAMPAIGN_MANAGER, BRAND_MANAGER]
-  source_frame: "Agency Admin Dashboard (1.5).docx - Campaign Manager section, Brand Dashboard (image15)"
+  title: Brand Overview
+  route: /brand-overview
+  nav_label: Overview
+  audience: [BRAND_MANAGER]
+  source_frame: "GENIE1.md section 3 (src/segments/non-premium/routes.ts) + section 2.2; originally Agency Admin Dashboard (1.5).docx, Brand Dashboard (image15)"
   purpose: >
-    A per-brand view that appears only in the Campaign Manager's navigation. Not present in the Media Partner Admin set.
+    The landing tab of the Brand Manager's own read-only console. A brand's own people see their
+    campaigns and their spend here; they do not get the partner console with pieces hidden.
   entities: [brand, campaign]
   related_screens: [brand_management, campaign_detail]
 
   notes:
     - >
-      NOT YET TRANSCRIBED. This screen appears only in the Campaign Manager frames and was not swept
-      in detail - the frame was shared with the AdGuide panel and the distinct content was not read.
-      Modelled as a stub so NAVIGATE has a route and the graph has no dangling reference.
+      RESOLVED 2026-10-26 (R34). This screen's OPEN QUESTION - "is this a distinct screen, or the
+      Campaign Manager's rendering of Brand Management?" - is answered by GENIE1.md section 3: it is
+      neither. BRAND_MANAGER has a separate three-tab console (/brand-overview, /brand-campaigns,
+      /brand-account) rendered by BrandConsoleTabs, with its own navigation. The Campaign Manager
+      uses the ordinary /brand-management pages.
+      It was modelled on /brand-management/{brandId}, which is Brand Management's own route - two
+      screens on one route, so NAVIGATE had two different answers for one page.
     - >
-      OPEN QUESTION - is this a distinct screen, or the Campaign Manager's rendering of Brand
-      Management under a different name? The Campaign Manager nav drops Team Management and adds
-      this, which suggests a genuinely different page rather than a relabel. Worth one look before
-      anyone builds against it.
+      Still NOT TRANSCRIBED. Only the route, the audience and the shape of the console are known.
+      Nothing reads metrics off this screen yet, and nothing should until someone sees it.
     - >
-      BRAND_MANAGER is view-only in the backend (2.3), so if this screen is theirs it should carry
-      no actions at all. That has not been confirmed.
+      Its two sibling tabs - /brand-campaigns and /brand-account - are real routes (they are in
+      ontology/routes.yaml) and are not modelled as screens. A Brand Manager asking to be taken to
+      either is currently unroutable, which is honest: we have never seen them.
+    - >
+      BRAND_MANAGER holds VIEW_CLIENT, VIEW_CAMPAIGN, VIEW_WALLET and VIEW_INVOICES and nothing
+      else (GENIE1.md section 2, ROLE_PERMISSIONS), so this console carries no actions at all.
+      Genie must not offer one here.
     - >
       Whatever it shows, the metric definitions will already exist in the other screen files -
       metrics are defined once and referenced, not redefined per screen.

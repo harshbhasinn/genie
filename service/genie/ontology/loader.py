@@ -148,6 +148,7 @@ def _parse_screen(doc: dict, path: Path) -> Screen:
         id=s["id"], title=s["title"], route=s["route"],
         purpose=" ".join(str(s["purpose"]).split()),
         audience=_tuple(s["audience"]), nav_label=s.get("nav_label"),
+        entity_route=s.get("entity_route"),
         metrics=tuple(metrics), actions=actions,
     )
 

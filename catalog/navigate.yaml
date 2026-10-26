@@ -97,18 +97,24 @@ capabilities:
       - open wallet management
       - go to my credits
     authorization:
-      gate: PERMISSION
-      permission: VIEW_WALLET
+      gate: ROLE
+      roles: [AD_PARTNER_ADMIN, CAMPAIGN_MANAGER]
     execution:
       state_changing: false
       method: NONE
       layer: frontend
     gotchas:
       - >
-        A CAMPAIGN_MANAGER has no VIEW_WALLET permission in the default bundle. Confirm before
-        offering this to that role - it is adjacent to R6.
+        R35 RULED - a CAMPAIGN_MANAGER has no VIEW_WALLET permission, and still reaches this page.
+        GENIE1.md section 3 shows Wallet Management with NO gate in the nav bar, and section 8.5
+        gives every campaign manager a sub-wallet of their own plus members/me/wallet/request-topup.
+        What VIEW_WALLET gates is the ACCOUNT-level reads on the screen (wallet/balance,
+        settlements/summary) - measured on QA as 403 on all three partner pots. So navigation is
+        allowed and the figures are scoped: a manager lands here and sees their own sub-wallet.
+        Gating the ROUTE on VIEW_WALLET refused a manager a page the console opens for them, which
+        is the same mistake as treating blocked as unroutable.
     status: verified
-    verified_against: "Ontology screen wallet_management"
+    verified_against: "GENIE1.md section 3 nav table + section 8.5; ontology screen wallet_management"
 
   - id: navigate.team
     label: Go to Team Management
@@ -156,6 +162,14 @@ capabilities:
     gotchas:
       - >
         Approvals live under Notifications as a sub-tab, not as a top-level nav item.
+      - >
+        R36 RULED - the SCREEN is shared, this CAPABILITY is not. GENIE1.md section 8.8 shows the
+        inbox has two sides, "For me" and "My requests", so /notifications is a campaign manager's
+        screen too and its audience says so. But this capability is the CHECKER's queue - every one
+        of its utterances asks what is awaiting a signature - and a campaign manager is never a
+        checker. The maker's side is served by campaign.withdraw_request, campaign.resubmit_request
+        and approvals.request_status, which read /approvals/mine and do grant CAMPAIGN_MANAGER.
+        Widening these roles made the queue reachable by someone who can never sign anything.
       - >
         Genie can usefully summarise the queue on the way - how many, whose, total budget, oldest
         waiting - rather than just opening the page.

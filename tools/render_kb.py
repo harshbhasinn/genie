@@ -63,7 +63,13 @@ def render_screen(doc: dict, src: str, digest: str = "") -> tuple[str, str]:
     lines.append(BANNER.format(src=src))
     lines.append(f"\n# {s['title']}\n")
     lines.append(f"{' '.join(s['purpose'].split())}\n")
-    lines.append(f"**Where:** `{s['route']}`  ")
+    # A screen with both an index and a per-entity page is two real pages, and a
+    # reader needs to see the pair: /brand-management lists the brands,
+    # /brand-management/{brandId} is one of them.
+    where = f"`{s['route']}`"
+    if s.get("entity_route"):
+        where += f" — one at a time, `{s['entity_route']}`"
+    lines.append(f"**Where:** {where}  ")
     lines.append(f"**Who can see it:** {', '.join(s['audience'])}\n")
 
     if s.get("nav_label") and s["nav_label"] != s["title"]:

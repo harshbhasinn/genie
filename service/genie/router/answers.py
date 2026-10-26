@@ -10,6 +10,7 @@ So the model never writes a definition. It may add connective tissue around one.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 from ..ontology import Ontology
@@ -171,8 +172,55 @@ def capability_facts(ontology: Ontology, roles: frozenset[str],
 
 # ── navigation ──────────────────────────────────────────────────────────
 
-def navigate_facts(cap: Capability, ontology: Ontology,
-                   role: str | None) -> Facts:
+_ROUTE_PARAM = re.compile(r"\{([A-Za-z][A-Za-z0-9_]*)\}")
+
+# What a path parameter is called when Genie has to ask for it.
+_PARAM_NOUN = {"brandId": "brand", "campaignId": "campaign", "screenId": "screen",
+               "userId": "team member", "resellerId": "advertising partner",
+               "tab": "tab"}
+
+
+def route_params(route: str) -> tuple[str, ...]:
+    """The path parameters a route still needs, in order."""
+    return tuple(_ROUTE_PARAM.findall(route or ""))
+
+
+def fill_route(route: str, known: dict[str, str | None]) -> str | None:
+    """The route with every parameter filled, or None if any is still open.
+
+    Never returns a route with a placeholder left in it. That is the whole
+    point: `/brand-management/{brandId}` was shipped to users verbatim, because
+    navigate_facts handed back screen.route and nothing ever looked at it.
+    """
+    out = route
+    for name in route_params(route):
+        value = known.get(name)
+        if not value:
+            return None
+        out = out.replace("{" + name + "}", str(value))
+    return out
+
+
+def navigate_resolved(cap: Capability, ontology: Ontology, *,
+                      brand_id: str | None = None,
+                      campaign_id: str | None = None) -> bool:
+    """Is this navigate capability's route already complete?
+
+    Used to silence an entity_choice that has nothing to choose: "open brand
+    management" resolves to /brand-management, so "Which brand?" is a question
+    nobody posed. It is only a real question for a screen with no
+    parameterless route, like a brand's creative library.
+    """
+    screen = ontology.screen(cap.target_screen) if cap.target_screen else None
+    if screen is None:
+        return False
+    known = {"brandId": brand_id, "campaignId": campaign_id}
+    return fill_route(screen.route, known) is not None
+
+
+def navigate_facts(cap: Capability, ontology: Ontology, role: str | None, *,
+                   brand_id: str | None = None,
+                   campaign_id: str | None = None) -> Facts:
     """No model involved. This is the path with a 200 ms budget."""
     facts = Facts()
     target_id = cap.target_screen
@@ -190,8 +238,33 @@ def navigate_facts(cap: Capability, ontology: Ontology,
         "or two sentences — do not offer a link that will refuse them.")
         return facts
 
-    facts.add("navigate", screen.route, screen_id=screen.id, title=screen.title,
-              label=cap.label)
+    known = {"brandId": brand_id, "campaignId": campaign_id}
+    held = any(known.values())
+
+    # The per-entity page when the entity is in hand, the index page otherwise.
+    # A screen with both is a real pair of pages: /brand-management lists the
+    # brands and /brand-management/{brandId} is one of them, so "open brand
+    # management" is answerable without naming a brand and used to ask anyway.
+    ordered: list[str] = []
+    for route in ((screen.entity_route,) if held else ()) + (screen.route, screen.entity_route):
+        if route and route not in ordered:
+            ordered.append(route)
+
+    for route in ordered:
+        if (link := fill_route(route, known)) is not None:
+            facts.add("navigate", link, screen_id=screen.id, title=screen.title,
+                      label=cap.label, entity=link != screen.route)
+            return facts
+
+    # Every route this screen has needs something we do not hold. Say which --
+    # a link with a placeholder in it is not a link.
+    missing = [p for r in ordered for p in route_params(r) if not known.get(p)]
+    noun = _PARAM_NOUN.get(missing[0], "item") if missing else "item"
+    facts.add("navigate_needs", f"{screen.title} opens for one {noun}. "
+              f"Tell me which {noun} and I will take you there.",
+              screen_id=screen.id, title=screen.title, needs=missing[:1],
+              verbatim=True)
+    facts.prose_hint = None   # authored: NAVIGATE does not call a model
     return facts
 
 

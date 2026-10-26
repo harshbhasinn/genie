@@ -47,6 +47,32 @@ def load_screens() -> list[tuple[Path, dict]]:
     return out
 
 
+ROUTES = ONT / "routes.yaml"
+
+
+def _shape(route: str) -> str:
+    """A route's SHAPE: every path parameter collapsed to '*'.
+
+    The registry is transcribed in the frontend's own spelling and the ontology
+    names its parameters, so "/campaign/{campaignId}" and "/campaign/:id" are
+    the same route. Comparing shapes means a rename of a parameter is not a
+    failure, while a route the console does not serve always is.
+    """
+    out = []
+    for seg in route.split("/"):
+        out.append("*" if (seg.startswith("{") and seg.endswith("}")) or seg.startswith(":")
+                   else seg)
+    return "/".join(out)
+
+
+def load_route_registry() -> tuple[dict[str, str], str, str]:
+    """(shape -> the registry's own spelling, basename, overlay)."""
+    with ROUTES.open(encoding="utf-8") as fh:
+        doc = yaml.safe_load(fh) or {}
+    known = {_shape(r): r for r in (doc.get("routes") or [])}
+    return known, doc.get("basename", ""), doc.get("overlay", "")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--strict", action="store_true",
@@ -72,6 +98,12 @@ def main() -> int:
     seen_screen_ids: set[str] = set()
     all_metric_ids: set[str] = set()
 
+    if not ROUTES.exists():
+        print(f"ERROR: route registry not found at {ROUTES}")
+        return 1
+    known_routes, basename, overlay = load_route_registry()
+    route_owner: dict[str, str] = {}
+
     for path, doc in screens:
         rel = path.relative_to(ROOT)
 
@@ -87,6 +119,37 @@ def main() -> int:
         if sid in seen_screen_ids:
             errors.append(f"{rel}: duplicate screen id '{sid}'")
         seen_screen_ids.add(sid)
+
+        # 0. Routes must be routes the console actually serves.
+        #
+        # Nine of twelve were invented from Figma frames and shipped, because
+        # nothing compared them to src/segments/non-premium/routes.ts. A
+        # fictional route is a deep link into a 404, which is a worse answer
+        # than a refusal.
+        for key in ("route", "entity_route"):
+            route = s.get(key)
+            if not route:
+                continue
+            if route == overlay:
+                continue                      # the panel overlays every route
+            shape = _shape(route)
+            if shape not in known_routes:
+                errors.append(
+                    f"{rel}: {key} '{route}' is not a route this console serves. "
+                    f"ontology/routes.yaml lists the real ones; add it there only "
+                    f"after reading it out of the frontend's registry.")
+            elif route != known_routes[shape] and ":" not in known_routes[shape]:
+                warnings.append(
+                    f"{rel}: {key} '{route}' matches '{known_routes[shape]}' "
+                    f"but spells a parameter differently")
+            owner = route_owner.get(shape)
+            if owner and key == "route":
+                errors.append(
+                    f"{rel}: route '{route}' is already screen '{owner}'. Two "
+                    f"screens on one route means NAVIGATE sends two different "
+                    f"requests to the same page.")
+            elif key == "route":
+                route_owner[shape] = sid
 
         metrics = s.get("metrics") or []
         ids = [m["id"] for m in metrics if "id" in m]
@@ -205,7 +268,9 @@ def main() -> int:
 
     # ---- report ----
     total = sum(status_counts.values())
-    print(f"\nOntology: {len(screens)} screen(s), {total} metric(s)\n")
+    print(f"\nOntology: {len(screens)} screen(s), {total} metric(s)")
+    print(f"Routes:   {len(known_routes)} in the registry, mounted under "
+          f"'{basename}'\n")
     for st in ("verified", "pending_verification", "blocked", "pending_transcription"):
         n = status_counts.get(st, 0)
         if n:

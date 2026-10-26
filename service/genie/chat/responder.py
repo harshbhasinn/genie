@@ -175,6 +175,13 @@ def _remember_campaigns(session: Session, requests) -> None:
     session.remember("campaign", (r.subject for r in requests if r.operation == "CAMPAIGN_CONFIRM"))
 
 
+def _campaign_in_context(ctx: UIContext) -> str | None:
+    """`selected_entity` is whatever the panel has selected, so it is a campaign
+    id only on the campaign page. Reading it anywhere else would fill
+    /campaign/{campaignId} with a brand or a widget id."""
+    return ctx.selected_entity if ctx.screen == "campaign_detail" else None
+
+
 class Responder:
     def __init__(self, ontology: Ontology, provider: Provider | None,
                  router: IntentRouter | None = None, bff: BffClient | None = None,
@@ -306,8 +313,13 @@ class Responder:
                      # "show me recent transactions" means the latest ones: no period to ask
                      or (cap.id == SPENDING_CAP and spending_kind(text) == "ledger")
                      or (cap.id == "campaign.list" and names_a_state(text)))
+        # decide() also silences an entity_choice with nothing to choose, which is
+        # why it gets the ontology and the panel's context: /brand-management is
+        # the list of brands, so "open brand management" needs no brand.
         ask = None if (own_wallet_only or asks_live) else decide_follow_up(
-            cap, screen=ctx.screen, query=text, asked=session.asked)
+            cap, screen=ctx.screen, query=text, asked=session.asked,
+            ontology=self._ontology, brand_id=ctx.brand_id,
+            campaign_id=_campaign_in_context(ctx))
         if ask is not None:
             session.asked[ask.follow_up.id] = session.asked.get(ask.follow_up.id, 0) + 1
             yield _ask(session, text, cap.id, ask.as_block())
@@ -642,7 +654,12 @@ class Responder:
     def _facts_for(self, cap: Capability, text: str, ctx: UIContext,
                    roles: frozenset[str], permissions: frozenset[str]) -> build.Facts:
         if cap.mode is Mode.NAVIGATE:
-            return build.navigate_facts(cap, self._ontology, ctx.role)
+            # The panel says which brand's pages the user is in; a selected
+            # campaign is the campaign they are looking at. Both fill a route
+            # without a BFF call, which is what the 200 ms budget is for.
+            return build.navigate_facts(
+                cap, self._ontology, ctx.role, brand_id=ctx.brand_id,
+                campaign_id=_campaign_in_context(ctx))
         if cap.mode is Mode.HANDOFF:
             return build.handoff_facts(cap)
         if cap.status is Status.BLOCKED:

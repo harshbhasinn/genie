@@ -2,11 +2,11 @@
 doc_id: screen-notifications-approvals
 title: Campaign Approvals
 source_kind: generated
-audience: [AD_PARTNER_ADMIN]
+audience: [AD_PARTNER_ADMIN, CAMPAIGN_MANAGER]
 client_scope: null
 status: published
 owner: genie-build
-source_digest: afbbaf86485e
+source_digest: bb5830b470a9
 verified_against: ontology/screens/notifications-approvals.yaml
 effective_from: null
 effective_to: null
@@ -21,7 +21,7 @@ effective_to: null
 Maker-checker. Campaigns created by campaign managers sit here until an admin authorises them with an OTP. Rejected ones go back to the manager with a remark.
 
 **Where:** `/notifications`  
-**Who can see it:** AD_PARTNER_ADMIN
+**Who can see it:** AD_PARTNER_ADMIN, CAMPAIGN_MANAGER
 
 > The navigation calls this **Pending Approvals** while the page heading reads **Campaign Approvals**. Both names refer to the same screen.
 
