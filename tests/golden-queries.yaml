@@ -1438,3 +1438,57 @@ queries:
       metrics: []
       refuses: true
     why: OTP-gated. Genie names the request and hands off.
+
+  # ── navigation: the route, not just the capability (R34-R36, 2026-10-26) ──
+  # Nine of twelve routes were fictional and nothing noticed, because this file
+  # scored capability, mode and follow-up and never looked at where Genie sent
+  # anyone. These six pin the cases that were wrong.
+
+  - id: g118
+    query: open brand management
+    context: {screen: command_centre, role: AD_PARTNER_ADMIN}
+    expect:
+      capability: navigate.brands
+      mode: navigate
+      follow_up: null
+      metrics: []
+    why: >
+      /brand-management is the LIST of brands, so this is answerable without naming one.
+      It used to ask "Which brand?" and then emit "/brand-management/{brandId}" verbatim.
+
+  - id: g119
+    query: show me my brands
+    context: {screen: wallet_management, role: CAMPAIGN_MANAGER}
+    expect:
+      capability: navigate.brands
+      mode: navigate
+      follow_up: null
+      metrics: []
+    why: >
+      A campaign manager has brands under them too, and the list page needs no brand.
+
+  - id: g120
+    query: open wallet management
+    context: {screen: command_centre, role: CAMPAIGN_MANAGER}
+    expect:
+      capability: navigate.wallet
+      mode: navigate
+      follow_up: null
+      metrics: []
+    why: >
+      R35 - Wallet Management is ungated in the nav bar and every campaign manager has a
+      sub-wallet. Gating the route on VIEW_WALLET refused them a page the console opens.
+      What VIEW_WALLET gates is the account-level figures on the screen, not the door.
+
+  - id: g121
+    query: go to team management
+    context: {screen: command_centre, role: CAMPAIGN_MANAGER}
+    expect:
+      capability: navigate.team
+      mode: navigate
+      follow_up: null
+      metrics: []
+      denied: true
+    why: >
+      The gate that SHOULD hold. MANAGE_ASSIGNEES is genuinely not a campaign manager's, so
+      this routes and then refuses - it does not pretend to misunderstand.

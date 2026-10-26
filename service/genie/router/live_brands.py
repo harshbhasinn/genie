@@ -1,17 +1,23 @@
 """Links to screens that live under a brand, with the brand filled in.
 
-/brands/{brandId}/creatives is not a link until {brandId} is a real brand. Genie
-picks it the same way it picks a campaign: the brand on screen, then one the user
-named, then the only one - otherwise it asks "Which brand?" with the user's own
-brands. Navigation never calls a model.
+/brand-management/library/{brandId} is not a link until {brandId} is a real
+brand. Genie picks it the same way it picks a campaign: the brand on screen,
+then one the user named, then the only one - otherwise it asks "Which brand?"
+with the user's own brands. Navigation never calls a model.
+
+navigate.brands is NOT here. /brand-management is a real page - the list of
+brands - so "open brand management" is answerable without naming one, and
+asking which brand was a question nobody posed. Only the screens that have no
+parameterless form belong in BRAND_CAPS.
 """
 from __future__ import annotations
 
 from ..data.brands import Brand, BrandList
 from .live_answers import MAX_LISTED, LiveAnswer, couldnt, entity_choice, names, text_answer
 
-# navigate capabilities whose target screen's route needs {brandId}
-BRAND_CAPS = ("navigate.brands", "navigate.creatives", "campaign.open_wizard")
+# Capabilities whose target screen has NO parameterless route, so a brand must be
+# resolved before there is a link at all.
+BRAND_CAPS = ("navigate.creatives", "campaign.open_wizard")
 
 
 def pick_brand(text: str, got: BrandList, *, chosen_id: str | None = None,

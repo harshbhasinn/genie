@@ -30,6 +30,11 @@
           "type": "string",
           "pattern": "^/"
         },
+        "entity_route": {
+          "type": "string",
+          "pattern": "^/",
+          "description": "The route for ONE entity, when `route` is a list or index page that also has a per-entity form. /brand-management lists brands; /brand-management/{brandId} is one of them. NAVIGATE uses this only once the entity is resolved, and never emits either with a placeholder left in it."
+        },
         "nav_label": {
           "type": "string"
         },

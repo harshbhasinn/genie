@@ -2,7 +2,8 @@ screen:
   id: brand_management
   kind: screen
   title: Brand Management
-  route: /brand-management/{brandId}
+  route: /brand-management
+  entity_route: /brand-management/{brandId}
   nav_label: Brand Management
   audience: [AD_PARTNER_ADMIN, CAMPAIGN_MANAGER]
   source_frame: "Agency Admin Dashboard (1.5).docx - Brand Management (image3)"

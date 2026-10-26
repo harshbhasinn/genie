@@ -307,6 +307,31 @@ therefore to catch it being wrong.
 **`ui_context` is a hint, never an authority.** Every id in it is re-validated against
 `UserContext.accessible_client_ids` server-side. A tampered payload must buy nothing.
 
+### 4.3b The route contract — who owns `/agency`
+
+Genie emits routes **without** the router basename. `navigate.wallet` answers
+`/wallet-management`; the browser is at `/agency/wallet-management`. `actions/navigate.ts`
+prepends the basename, or passes the route to a react-router `<Link>` that already has it.
+
+That split is recorded in **`ontology/routes.yaml`**, which also holds the console's real route
+registry, transcribed from `src/segments/non-premium/routes.ts` (GENIE1.md §3). The registry exists
+because it had to: nine of the twelve screen routes in the ontology were invented from Figma frames
+and shipped, because the golden set scored capability, mode and follow-up and never once looked at
+the route Genie handed back. `tools/validate_ontology.py` now fails the build on a route that is not
+in the registry, and on two screens claiming one route.
+
+Three rules for whoever consumes a `navigate` block:
+
+1. **The route is always complete.** Genie never emits a path with a `{brandId}` left in it — it
+   either fills the parameter from `ui_context.entities`, resolves it from the user's own brands, or
+   returns a `navigate_needs` block saying what it needs instead. A placeholder reaching the DOM is
+   a bug in Genie, not something the panel should paper over.
+2. **A screen may have two routes.** `/brand-management` lists the brands and
+   `/brand-management/{brandId}` is one of them, so the `navigate` block carries
+   `meta.entity: true` when it resolved to the per-entity page. Both are real pages.
+3. **A `denied` block is not an error.** It means Genie understood and the screen is not this
+   user's — render the sentence, do not offer the link, and do not retry.
+
 ### 4.4 Auth
 
 No separate login. The panel sends the dashboard's existing JWT; `ag-genie-service` verifies it

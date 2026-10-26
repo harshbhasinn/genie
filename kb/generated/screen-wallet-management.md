@@ -2,11 +2,11 @@
 doc_id: screen-wallet-management
 title: Wallet Management
 source_kind: generated
-audience: [AD_PARTNER_ADMIN]
+audience: [AD_PARTNER_ADMIN, CAMPAIGN_MANAGER]
 client_scope: null
 status: published
 owner: genie-build
-source_digest: 27796f296b7c
+source_digest: 6c762a795b64
 verified_against: ontology/screens/wallet-management.yaml
 effective_from: null
 effective_to: null
@@ -21,7 +21,7 @@ effective_to: null
 Billing, credits, sub-wallet allocations and payment history. You hold one main wallet and each campaign manager holds a sub-wallet beneath it; campaigns are paid from whichever applies.
 
 **Where:** `/wallet-management`  
-**Who can see it:** AD_PARTNER_ADMIN
+**Who can see it:** AD_PARTNER_ADMIN, CAMPAIGN_MANAGER
 
 
 ## What this screen shows

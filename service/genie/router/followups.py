@@ -13,7 +13,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ..ontology.models import Capability, FollowUp
+from ..ontology import Ontology
+from ..ontology.models import Capability, FollowUp, Mode
+from .answers import navigate_resolved
 from .lexical import normalise, tokens
 
 
@@ -132,20 +134,46 @@ def _is_relevant(follow_up: FollowUp, cap: Capability, query: str) -> bool:
     return bool(said & subject) if subject else True
 
 
+def _settled(cap: Capability, ontology: Ontology | None,
+             brand_id: str | None, campaign_id: str | None) -> frozenset[str]:
+    """entity_choice ids that have nothing left to choose.
+
+    A navigate capability whose target route is already complete - either it
+    takes no parameter, or the panel already named the entity - does not need
+    to ask which one.
+    """
+    if ontology is None or cap.mode is not Mode.NAVIGATE:
+        return frozenset()
+    if not navigate_resolved(cap, ontology, brand_id=brand_id,
+                             campaign_id=campaign_id):
+        return frozenset()
+    return frozenset(f.id for f in cap.follow_ups if f.kind == "entity_choice")
+
+
 def decide(cap: Capability, *, screen: str | None,
            query: str = "",
            asked: dict[str, int] | None = None,
-           already_known: frozenset[str] = frozenset()) -> Ask | None:
+           already_known: frozenset[str] = frozenset(),
+           ontology: Ontology | None = None,
+           brand_id: str | None = None,
+           campaign_id: str | None = None) -> Ask | None:
     """The first RELEVANT follow-up that still needs asking, or None.
 
     `asked` counts how many times each follow-up has fired this session, so
     max_asks is honoured across turns rather than within one.
+
+    `ontology` lets a NAVIGATE entity_choice check whether it has anything to
+    choose: /brand-management is the list of brands, so "open brand management"
+    needs no brand and asking for one is noise. This lived in the responder for
+    one commit, which meant the golden runner called decide() directly and got
+    the old answer - the rule belongs with the decision, not with one caller.
     """
     asked = asked or {}
+    settled = _settled(cap, ontology, brand_id, campaign_id) | already_known
     for follow_up in cap.follow_ups:
         if follow_up.suppressed_on(screen):
             continue
-        if follow_up.id in already_known:
+        if follow_up.id in settled:
             continue
         if query and not _is_relevant(follow_up, cap, query):
             continue
