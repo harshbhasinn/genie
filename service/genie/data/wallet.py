@@ -7,14 +7,14 @@ cost leg — and whether an agency may be shown that is an open question
 adds tomorrow cannot leak into an answer by accident.
 
 Sources follow the ontology (ontology/screens/wallet-management.yaml):
-  main_wallet_balance   GET /api/v1/clients/{clientId}/wallet/balance          balance
-  sub_wallet_total      GET /api/v1/clients/{clientId}/members/wallet-overview totalSubWalletBalance
+  main_wallet_balance   wallet.balance           balance
+  sub_wallet_total      wallet.members_overview  totalSubWalletBalance
   total_credits_owned   computed here: main + sub-wallets (a UI aggregate, never a ledger)
-  month_consumption     GET /api/v1/clients/{clientId}/wallet/kpis             consumedThisMonth
-  wallet_runway_days    GET /api/v1/clients/{clientId}/wallet/kpis      runwayMonths — MONTHS (R32)
-  low balance flag      GET /api/v1/clients/{clientId}/wallet/kpis      lowBalance, lowBalanceThreshold
-  manager_*             GET /api/v1/clients/{clientId}/members/wallet-overview members[]
-  user_subwallet_balance GET /api/v1/clients/{clientId}/members/{userId}/wallet/summary currentBalance
+  month_consumption     wallet.kpis              consumedThisMonth
+  wallet_runway_days    wallet.kpis              runwayMonths — MONTHS (R32)
+  low balance flag      wallet.kpis              lowBalance, lowBalanceThreshold
+  manager_*             wallet.members_overview  members[]
+  user_subwallet_balance wallet.my_subwallet     currentBalance
 
 Runway is read, never recomputed: the backend already decided what "runway" means.
 """
@@ -24,12 +24,13 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 
 from ..bff import BffClient, BffError
+from ..bff.endpoints import endpoint
 from .money import inr, inr_short, to_decimal
 
-BALANCE = "/api/v1/clients/{clientId}/wallet/balance"
-KPIS = "/api/v1/clients/{clientId}/wallet/kpis"
-OVERVIEW = "/api/v1/clients/{clientId}/members/wallet-overview"
-MY_SUBWALLET = "/api/v1/clients/{clientId}/members/{userId}/wallet/summary"
+BALANCE = endpoint("wallet.balance")
+KPIS = endpoint("wallet.kpis")
+OVERVIEW = endpoint("wallet.members_overview")
+MY_SUBWALLET = endpoint("wallet.my_subwallet")
 
 
 @dataclass(frozen=True, slots=True)

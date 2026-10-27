@@ -92,7 +92,7 @@ class BffClient:
     async def get(self, template: str, *, token: str | None,
                   path_params: dict[str, str] | None = None,
                   params: dict[str, Any] | None = None) -> BffResponse:
-        """GET `template` (e.g. /api/v1/clients/{clientId}/wallet/kpis) and unwrap it.
+        """GET `template` (a path from ontology/endpoints.yaml) and unwrap it.
 
         The template is what gets logged and reported, so a client id or user id
         never ends up in a log line either.

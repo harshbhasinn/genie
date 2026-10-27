@@ -16,12 +16,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from ..data.campaigns import (NOT_STARTED, RUNNING, STATE_LABEL, Breakdown, Campaign, CampaignList,
+                              LaunchCheck,
                               CampaignView, Dayparts, GenderSplit, flight_days)
 from ..data.fields import day, humanize
 from ..data.money import count, count_of, pct
 from .answers import Facts
 from .lexical import tokens
-from .live_answers import (LIVE_PROSE, MAX_LISTED, PROBLEM_TEXT, LiveAnswer, between, couldnt,
+from .live_answers import (LIVE_PROSE, MAX_LISTED, PROBLEM_TEXT, LiveAnswer, and_list, between,
+                           couldnt,
                            entity_choice, names, text_answer)
 
 PLAYED = frozenset({"COMPLETED"}) | RUNNING
@@ -36,9 +38,13 @@ ACTION_STATES: dict[str, frozenset[str] | None] = {
     "campaign.resume": frozenset({"PAUSED"}),
     "campaign.cancel": frozenset({"SCHEDULED", "LIVE", "PAUSED", "NOT_PLAYING"}),
 }
+LAUNCH_CAP = "creative.explain_launch_blocker"
+# The campaigns a question can be about, by state (None = any): an action's own states, and
+# drafts for "what's blocking my launch" - nothing else has a launch left to block.
+ELIGIBLE = {**ACTION_STATES, LAUNCH_CAP: frozenset({"DRAFT"})}
 ONE_CAMPAIGN = ("campaign.explain_performance", "campaign.explain_pacing",
                 "campaign.explain_audience", "campaign.explain_breakdown",
-                "campaign.explain_daypart") + tuple(ACTION_STATES)
+                "campaign.explain_daypart", LAUNCH_CAP) + tuple(ACTION_STATES)
 CAMPAIGN_CAPS = ONE_CAMPAIGN + ("campaign.list",)
 _ACTION_WORDS = {"campaign.pause": ("pause", "paused"), "campaign.resume": ("resume", "resumed"),
                  "campaign.cancel": ("cancel", "cancelled")}
@@ -392,6 +398,58 @@ def daypart_answer(c: Campaign, got: Dayparts) -> LiveAnswer:
                + [i["peak_hour"] or "" for i in items] + [c.name, count(got.outside or 0)]
                + ([day(d) for d in got.window] if got.window else []))
     return LiveAnswer(facts=facts, card=card, template=" ".join(sentences), allowed=allowed)
+
+
+# ── what a draft still needs ────────────────────────────────────────────
+
+ZONES = (("HERO", "image"), ("SHOWCASE", "video"))         # zone -> the slot it fills
+WAITING = {"AWAITING_AI_VERDICT": "being checked automatically",
+           "PENDING_REVIEW": "waiting for a person to review"}
+
+
+def launch_answer(c: Campaign, check: LaunchCheck) -> LiveAnswer:
+    """Against the wizard's checklist: screens chosen, every slot filled, every creative
+    approved. A campaign confirms only with all three - there is no launching with a
+    creative still in review."""
+    if check.problem:
+        return text_answer(c.name, couldnt(f"read {c.name}", check.problem), authored=True)
+    if c.state != "DRAFT":
+        return text_answer(c.name, f"{c.name} is {c.state_label.lower()}, so it is already past "
+                                   f"launch.", authored=True)
+    wanted = {"HERO": check.image_slots, "SHOWCASE": check.video_slots}
+    have = {zone: sum(1 for x in check.creatives if x.zone == zone) for zone, _ in ZONES}
+    missing = []
+    if not check.has_screens:
+        missing.append("no screens are chosen yet")
+    for zone, kind in ZONES:
+        short = wanted[zone] - have[zone]
+        if short > 0:
+            missing.append(f"{count(short)} of {count_of(wanted[zone], kind + ' slot')} "
+                           f"{'has' if short == 1 else 'have'} no creative")
+    rejected = [x for x in check.creatives if x.review == "REJECTED"]
+    if rejected:
+        why = f" ({rejected[0].reason})" if len(rejected) == 1 and rejected[0].reason else ""
+        missing.append(f"{count_of(len(rejected), 'creative')} "
+                       f"{'was' if len(rejected) == 1 else 'were'} rejected{why}")
+    for status, doing in WAITING.items():
+        n = sum(1 for x in check.creatives if x.review == status)
+        if n:
+            missing.append(f"{count_of(n, 'creative')} {'is' if n == 1 else 'are'} {doing}")
+    if missing:
+        text = (f"{c.name} can't launch yet: {and_list(missing)}. It can be confirmed once every "
+                f"slot has an approved creative.")
+    elif c.approval and c.approval[1] == "pending":
+        text = f"Nothing is missing from {c.name}: it is awaiting approval ({c.approval[0]})."
+    else:
+        text = (f"Nothing is missing from {c.name}: every slot has an approved creative, so it is "
+                f"ready to confirm - confirming needs your OTP.")
+    approved = sum(1 for x in check.creatives if x.review == "APPROVED")
+    items = [{"metric_id": "launch_creatives", "label": f"{kind.capitalize()} creatives",
+              "display": f"{have[zone]} of {wanted[zone]}"} for zone, kind in ZONES if wanted[zone]]
+    items.append({"metric_id": "launch_creatives", "label": "Approved",
+                  "display": f"{approved} of {len(check.creatives)}"})
+    return LiveAnswer(facts=Facts(), card={"title": c.name, "items": items, "campaign": c.as_meta()},
+                      template=text, authored=True)
 
 
 def none_to_show(listing: CampaignList, *, one: bool = False) -> LiveAnswer:

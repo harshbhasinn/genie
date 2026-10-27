@@ -123,6 +123,7 @@ def session(screen="command_centre", selected=None, role="AD_PARTNER_ADMIN") -> 
     s.context = UIContext(screen=screen, role=role, client_id=CLIENT, selected_entity=selected)
     s.identity = Identity("u-1", "Admin", role, CLIENT,
                           (Grant(CLIENT, "Infinity", role, frozenset({"VIEW_CAMPAIGN"})),))
+    s.names_read_for = CLIENT         # past session start (Responder._learn_names): only this test's reads
     return s
 
 
@@ -376,8 +377,11 @@ def test_nothing_to_resume_says_so(ontology):
     assert nav(blocks) is None
 
 
-def test_open_a_named_campaign_goes_to_its_page(ontology):
-    blocks = run(Responder(ontology, None, bff=client_for(FakeBff())), session(),
+@pytest.mark.parametrize("names_known", [False, True])
+def test_open_a_named_campaign_goes_to_its_page(ontology, names_known):
+    s = session()
+    s.names_read_for = None if not names_known else s.names_read_for   # fresh: names read first
+    blocks = run(Responder(ontology, None, bff=client_for(FakeBff())), s,
                  "open the monsoon sale campaign")
     assert blocks[0].content == "campaign.open"
     assert not any(b.type == "follow_up" for b in blocks)
@@ -445,7 +449,6 @@ BRANDS = envelope({"brands": [{"brandId": "b-tanishq", "brandName": "Tanishq"},
 def brand_fake(brands=BRANDS):
     fake = FakeBff()
     fake.payloads[f"/api/v1/clients/{CLIENT}/brands"] = brands
-    fake.payloads[f"/api/v1/clients/{CLIENT}/members/u-1/brands"] = brands
     return fake
 
 
@@ -470,12 +473,13 @@ def test_a_named_brand_or_the_one_on_screen_needs_no_question(ontology):
     assert nav(on_screen).content == "/campaign/create-campaign/b-titan"
 
 
-def test_a_campaign_manager_gets_their_assigned_brands(ontology):
-    one = envelope({"brands": [{"brandId": "b-tanishq", "brandName": "Tanishq"}], "totalBrands": 1})
+def test_a_campaign_manager_reads_the_brand_management_list(ontology):
+    one = envelope({"brands": [{"brandId": "b-tanishq", "brandName": "Tanishq"}], "totalElements": 1})
     fake = brand_fake(one)
     blocks = run(Responder(ontology, None, bff=client_for(fake)), session(role="CAMPAIGN_MANAGER"),
                  "launch a new campaign")
-    assert f"/api/v1/clients/{CLIENT}/members/u-1/brands" in fake.paths
+    assert f"/api/v1/clients/{CLIENT}/brands" in fake.paths
+    assert not any("/members/" in p for p in fake.paths)    # the admin's member read refuses them
     assert nav(blocks).content == "/campaign/create-campaign/b-tanishq"
 
 

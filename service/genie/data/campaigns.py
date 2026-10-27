@@ -5,14 +5,14 @@ full-detail response also carries adgridCost and a cost breakdown — the
 AdGrid-to-agency leg — which stays out for the same reason as on the wallet.
 
 Sources (live spec; /reach and /spend are also what the AdOps dashboard on QA calls):
-  list, state, dates, cost, scope   GET /api/v1/campaigns?clientId=        campaigns[], totalElements
-  one campaign                      GET /api/v1/campaigns/{campaignId}
-  campaign_impressions              GET /api/v1/campaign-analytics/{id}/impressions  totalImpressions
-  campaign_reach                    GET /api/v1/campaign-analytics/{id}/reach        reachForRange
-  campaign_spend                    GET /api/v1/campaign-analytics/{id}/spend        spendForRange
+  list, state, dates, cost, scope   campaigns.list         ?clientId=  campaigns[], totalElements
+  one campaign                      campaigns.detail
+  campaign_impressions              campaigns.impressions  totalImpressions
+  campaign_reach                    campaigns.reach        reachForRange
+  campaign_spend                    campaigns.spend        spendForRange
   campaign_time_elapsed             computed here from startDate, endDate and today
-  by city / store type / daypart    GET /api/v1/campaign-analytics/{id}/performance-breakdown?groupBy=
-  by hour of the day                GET /api/v1/campaign-analytics/{id}/impressions/daypart
+  by city / store type / daypart    campaigns.breakdown    ?groupBy=
+  by hour of the day                campaigns.dayparts
 
 groupBy is CITY, CATEGORY or DAYPART (CampaignPerformanceBreakdownServiceImpl on QA;
 the dashboard sends CITY). A breakdown row carries spend and reach too, but those are
@@ -33,20 +33,21 @@ from datetime import date
 from decimal import Decimal
 
 from ..bff import BffClient, BffError
+from ..bff.endpoints import endpoint
 from .approvals import STATUS_LABEL as APPROVAL_STATUS
 from .fields import day, humanize, parse_date, to_int, window_of
 from .fields import today as today_ist
 from .money import count, count_short, inr, inr_short, to_decimal
 from .wallet import LiveFact
 
-LIST = "/api/v1/campaigns"
-DETAIL = "/api/v1/campaigns/{campaignId}"
-IMPRESSIONS = "/api/v1/campaign-analytics/{campaignId}/impressions"
-REACH = "/api/v1/campaign-analytics/{campaignId}/reach"
-SPEND = "/api/v1/campaign-analytics/{campaignId}/spend"
-GENDER = "/api/v1/campaign-analytics/{campaignId}/impressions/gender"
-BREAKDOWN = "/api/v1/campaign-analytics/{campaignId}/performance-breakdown"
-DAYPART = "/api/v1/campaign-analytics/{campaignId}/impressions/daypart"
+LIST = endpoint("campaigns.list")
+DETAIL = endpoint("campaigns.detail")
+IMPRESSIONS = endpoint("campaigns.impressions")
+REACH = endpoint("campaigns.reach")
+SPEND = endpoint("campaigns.spend")
+GENDER = endpoint("campaigns.gender")
+BREAKDOWN = endpoint("campaigns.breakdown")
+DAYPART = endpoint("campaigns.dayparts")
 # The campaign's own page - the ontology's campaign_detail route (a test holds them equal).
 CAMPAIGN_ROUTE = "/campaign/{campaignId}"
 
@@ -304,3 +305,42 @@ async def campaign_dayparts(bff: BffClient, token: str, c: Campaign) -> Dayparts
                           to_decimal(d.get("sharePct")), to_int(peak.get("hour")) if peak else None))
     out.slots.sort(key=lambda s: s[1] or 0, reverse=True)
     return out
+
+
+# ── what a draft still needs ────────────────────────────────────────────
+
+@dataclass(slots=True)
+class Creative:
+    name: str | None
+    zone: str | None          # HERO (image) or SHOWCASE (video)
+    review: str | None        # AWAITING_AI_VERDICT, APPROVED, PENDING_REVIEW, REJECTED
+    reason: str | None        # why it was rejected, when it was
+
+
+@dataclass(slots=True)
+class LaunchCheck:
+    """The wizard's checklist, read from the campaign itself: screens chosen, a creative in
+    every requested slot, every creative approved."""
+    image_slots: int = 0
+    video_slots: int = 0
+    has_screens: bool = False
+    creatives: list[Creative] = field(default_factory=list)
+    problem: str | None = None
+
+
+async def launch_check(bff: BffClient, token: str, c: Campaign) -> LaunchCheck:
+    """Reads the campaign's slots, selections and creatives - not its costs (adgridCost and
+    the cost breakdown are the AdGrid-to-partner leg, never read)."""
+    try:
+        d = (await bff.get(DETAIL, token=token, path_params={"campaignId": c.id})).data or {}
+    except BffError as err:
+        return LaunchCheck(problem=err.kind)
+    return LaunchCheck(
+        image_slots=to_int(d.get("imageSlotsRequested")) or 0,
+        video_slots=to_int(d.get("videoSlotsRequested")) or 0,
+        # screens chosen by city and store type, store by store, or - for a targeted
+        # campaign, which books no screens - as the cities and store types it targets
+        has_screens=bool(d.get("deviceSelections") or d.get("storeSelections") or d.get("targets")),
+        creatives=[Creative(x.get("fileName") or None, x.get("zone") or None, x.get("reviewStatus") or None,
+                            x.get("reviewDecisionReason") or x.get("aiMessage") or None)
+                   for x in d.get("creatives") or [] if isinstance(x, dict)])

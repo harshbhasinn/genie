@@ -106,7 +106,7 @@ def test_only_notes_written_for_users_reach_a_model(ontology):
 def test_a_model_may_repeat_a_number_from_any_fact_it_was_given(ontology):
     """A caveat's number ("18% GST") is a fact the model was given; a new one is invented."""
     from .test_spending import BASE, FakeWallet
-    from genie.router.live_spending import period_from
+    from genie.router.periods import period_from
     month = period_from("in September").start
     rollup = {BASE + "/consumption/monthly": {"rows": [
         {"month": f"{month:%Y-%m}", "consumed": "87500.00", "campaignCount": "3"}]}}
@@ -191,6 +191,7 @@ def test_a_resellers_campaign_manager_reads_their_own_subwallet(ontology):
     s.context = UIContext(screen="command_centre", role="RESELLER_CAMPAIGN_MANAGER", client_id=CLIENT)
     s.identity = Identity("u-cm", "CM", "RESELLER_CAMPAIGN_MANAGER", CLIENT,
                           (Grant(CLIENT, "Infinity", "RESELLER_CAMPAIGN_MANAGER", frozenset()),))
+    s.names_read_for = CLIENT         # past session start: only this test's reads
     fake = WalletBff()
     run(Responder(ontology, None, bff=client_for(fake)), s, "what's my wallet balance")
     paths = [c.url.path for c in fake.calls]

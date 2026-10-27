@@ -154,7 +154,10 @@ capabilities:
       path: "/api/v1/campaigns/{campaignId}"
       layer: bff
       state_changing: false
-      note: "Sub-status and creative assignments show what is still missing."
+      note: >
+        Read against the wizard's checklist: imageSlotsRequested / videoSlotsRequested against the
+        HERO / SHOWCASE creatives, each creative's reviewStatus, and whether screens are selected.
+        Only drafts are candidates. adgridCost and the cost breakdown are never read.
 
     gotchas:
       - >
