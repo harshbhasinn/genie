@@ -56,7 +56,7 @@ class Session:
     # follow-up id -> times asked. max_asks is honoured ACROSS turns, not within
     # one, or a user gets the same question every time they rephrase.
     asked: dict[str, int] = field(default_factory=dict)
-    # The grant's permissions from /api/v1/me (chat/router.py), when their vocabulary
+    # The grant's permissions from the `me` endpoint (chat/router.py), when their vocabulary
     # matches the catalog's; empty otherwise, and then role alone gates.
     permissions: frozenset[str] = frozenset()
     # Who the token says this is (genie.auth.identity.Identity), and whose token
@@ -69,6 +69,9 @@ class Session:
     # Names of the user's own things that live answers have shown (a campaign, a
     # brand), name -> kind, so a name is routed as a name and not as its words.
     entities: dict[str, str] = field(default_factory=dict)
+    # The account whose campaign and brand names have been read into `entities` -
+    # once per session, before its first question is routed.
+    names_read_for: str | None = None
 
     def remember(self, kind: str, names) -> None:
         for name in names:

@@ -17,7 +17,8 @@ from ..data.money import count, count_of, inr, to_decimal
 from ..roles import a_label
 from .answers import Facts
 from .lexical import normalise, tokens
-from .live_answers import MAX_LISTED, LiveAnswer, couldnt, entity_choice, names, text_answer
+from .live_answers import (MAX_LISTED, LiveAnswer, and_list, couldnt, entity_choice, names,
+                           text_answer)
 
 # capability -> (which list, operation filter, status for "mine")
 APPROVAL_CAPS: dict[str, tuple[str, str | None, str | None]] = {
@@ -322,14 +323,10 @@ def _hours(h: int) -> str:
     return count_of(h // 24, "day") if h and h % 24 == 0 else count_of(h, "hour")
 
 
-def _and(items: list[str]) -> str:
-    return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " and " + items[-1]
-
-
 def _clauses(r) -> list[str]:
     """What one rule says, as independent clauses - any of them may be missing."""
     out = []
-    stages = [_and(list(dict.fromkeys(a_label(x) for x in roles)))
+    stages = [and_list(list(dict.fromkeys(a_label(x) for x in roles)))
               for roles in r.approvers if roles]
     if stages:
         out.append("approved by " + ", then ".join(stages))
@@ -362,7 +359,7 @@ def rules_answer(got: Rules, operation: str | None) -> LiveAnswer:
     groups: dict[tuple, list] = {}
     for r in rules:
         groups.setdefault(tuple(_clauses(r)), []).append(r)
-    sentences = [f"{_and([r.label for r in members])}: {'; '.join(clauses)}."
+    sentences = [f"{and_list([r.label for r in members])}: {'; '.join(clauses)}."
                  for clauses, members in groups.items()]
     if got.approvers_known is False:
         which = "it" if len(rules) == 1 else "them"

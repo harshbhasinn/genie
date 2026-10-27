@@ -29,7 +29,10 @@ capabilities:
       path: "/api/v1/clients/{apId}/brands"
       layer: bff
       state_changing: false
-      note: "Described in the spec as the Brand Management left rail."
+      note: >
+        Described in the spec as the Brand Management left rail: brandName, campaignsCount,
+        totalBudget, totalElements. Every role reads it; members/{userId}/brands is the admin's
+        member-management read and refuses a campaign manager (403, live QA 2026-10-27).
 
     gotchas:
       - >
@@ -45,6 +48,7 @@ capabilities:
     mutating: false
     utterances:
       - how is Coca-Cola doing
+      - how is my brand doing
       - show me brand performance
       - which brand is performing best
       - what has this brand spent
@@ -118,6 +122,7 @@ capabilities:
     utterances:
       - who is the contact for this brand
       - who manages Coca-Cola
+      - who manages my brand
       - which campaign manager owns this
       - who do I speak to about this brand
 
@@ -130,6 +135,11 @@ capabilities:
       path: "/api/v1/clients/{clientId}"
       layer: bff
       state_changing: false
+      note: >
+        The brand is a client, so {clientId} is the brand's id; only sections=CLIENT_INFO is
+        requested, and only contactPersonName, designation, email, phoneNumber and
+        assignedUserName are read - never the GST/PAN/TAN/CIN numbers, rates or credit. The BFF
+        returns every section regardless (live QA 2026-10-27), so the allowlist is what holds.
 
     gotchas:
       - >

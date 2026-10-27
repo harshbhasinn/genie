@@ -1,0 +1,104 @@
+# Every dashboard BFF endpoint Genie reads. The paths live here and nowhere else:
+# code names an endpoint by its key (endpoint("wallet.balance")) and never spells a path.
+#
+# Rules the loader enforces (service/genie/bff/endpoints.py):
+#   - GET only. Genie is read-only; an action goes through the dashboard's own screens.
+#   - /api/v1 only. Genie does not use v2.
+#   - Each path once.
+# service/tests/test_endpoints.py checks every path against reference/bff-openapi.json,
+# and that every entry here is used by the code (no dead entries).
+#
+#   get   the path template, exactly as the spec writes it
+#   for   what Genie answers with it
+
+endpoints:
+
+  me:
+    get: /api/v1/me
+    for: Who is asking - role, the client they work for, and that role's permissions.
+
+  # ── wallet ────────────────────────────────────────────────────────────
+  wallet.balance:
+    get: /api/v1/clients/{clientId}/wallet/balance
+    for: The main wallet balance.
+  wallet.kpis:
+    get: /api/v1/clients/{clientId}/wallet/kpis
+    for: Spent this month, runway (in months), the low-balance flag.
+  wallet.members_overview:
+    get: /api/v1/clients/{clientId}/members/wallet-overview
+    for: The total in sub-wallets, and each manager's sub-wallet.
+  wallet.my_subwallet:
+    get: /api/v1/clients/{clientId}/members/{userId}/wallet/summary
+    for: A campaign manager's own sub-wallet.
+  wallet.spend_by_brand:
+    get: /api/v1/clients/{clientId}/wallet/spending-analysis
+    for: "Which brand is spending the most."
+  wallet.monthly:
+    get: /api/v1/clients/{clientId}/wallet/consumption/monthly
+    for: "What did we spend in September - month by month."
+  wallet.statement:
+    get: /api/v1/clients/{clientId}/wallet/statement
+    for: "Show me recent transactions - the ledger."
+  wallet.owed:
+    get: /api/v1/clients/{clientId}/wallet/settlements/summary
+    for: "What do I owe - outstanding bills."
+  wallet.bills:
+    get: /api/v1/clients/{clientId}/wallet/settlements
+    for: One month's bill and its status.
+
+  # ── campaigns ─────────────────────────────────────────────────────────
+  campaigns.list:
+    get: /api/v1/campaigns
+    for: The user's campaigns - state, dates, cost, approval; picks the campaign a question is about.
+  campaigns.detail:
+    get: /api/v1/campaigns/{campaignId}
+    for: One campaign in full; what a draft still needs before it can launch.
+  campaigns.impressions:
+    get: /api/v1/campaign-analytics/{campaignId}/impressions
+    for: A campaign's impressions so far.
+  campaigns.reach:
+    get: /api/v1/campaign-analytics/{campaignId}/reach
+    for: A campaign's reach.
+  campaigns.spend:
+    get: /api/v1/campaign-analytics/{campaignId}/spend
+    for: A campaign's spend so far, against its cost - pacing.
+  campaigns.gender:
+    get: /api/v1/campaign-analytics/{campaignId}/impressions/gender
+    for: A campaign's impressions by gender.
+  campaigns.breakdown:
+    get: /api/v1/campaign-analytics/{campaignId}/performance-breakdown
+    for: A campaign's impressions by city, store type or daypart.
+  campaigns.dayparts:
+    get: /api/v1/campaign-analytics/{campaignId}/impressions/daypart
+    for: A campaign's impressions by daypart, with each one's busiest hour.
+
+  # ── approvals ─────────────────────────────────────────────────────────
+  approvals.queue:
+    get: /api/v1/approvals/queue
+    for: Requests waiting for me, failed after approval, or decided by me.
+  approvals.mine:
+    get: /api/v1/approvals/mine
+    for: Requests I raised, and their status.
+  approvals.detail:
+    get: /api/v1/approvals/{referenceCode}
+    for: One request in full - its trail, stage, deadline and failure.
+  approvals.preview_today:
+    get: /api/v1/approvals/{referenceCode}/preview-today
+    for: What has changed in a request since it was raised.
+  approvals.automation:
+    get: /api/v1/clients/{clientId}/approval-automation
+    for: Each operation's deadline and what happens on timeout.
+  approvals.configs:
+    get: /api/v1/approval-configs
+    for: Who approves each operation, stage by stage.
+
+  # ── brands ────────────────────────────────────────────────────────────
+  brands.of_partner:
+    get: /api/v1/clients/{apId}/brands
+    for: The brands - each one's campaigns and budget. Every role reads this list, as the console does.
+  brands.analytics:
+    get: /api/v1/clients/{brandId}/analytics
+    for: How a brand is doing - live campaigns, screens, impressions and reach a day, booked value.
+  clients.detail:
+    get: /api/v1/clients/{clientId}
+    for: Who a brand's contact is, and who manages it (CLIENT_INFO only).

@@ -11,61 +11,25 @@ A period the user names is sent; otherwise the backend's default window is echoe
 """
 from __future__ import annotations
 
-import calendar
-import re
-from datetime import date, timedelta
+from datetime import date
 from decimal import Decimal
 
-from ..data.fields import day, humanize
-from ..data.fields import today as _today_ist   # `today` is also these functions' parameter
+from ..data.fields import Window, day, humanize
 from ..data.money import count_of, inr, inr_short, pct
-from ..data.spending import Bills, Ledger, Months, Owed, SpendByBrand, Window
+from ..data.spending import Bills, Ledger, Months, Owed, SpendByBrand
 from .answers import Facts
-from .lexical import normalise, tokens
+from .lexical import tokens
 from .live_answers import LIVE_PROSE, MAX_LISTED, LiveAnswer, between, couldnt, text_answer
 
 SPENDING_CAP = "wallet.explain_spending"
 INVOICE_CAP = "wallet.explain_invoices"
 FALLBACK_MONTHS = 3             # "what do I owe" from the bills when the summary is off
 
-_MONTHS = {m.lower(): i for i, m in enumerate(calendar.month_name) if m}
-_MONTHS |= {m.lower(): i for i, m in enumerate(calendar.month_abbr) if m}
-_MONTHS["sept"] = 9
-_YEAR = re.compile(r"\b(20\d\d)\b")
 LEDGER_WORDS = frozenset(tokens("transaction transactions entries entry ledger statement recent "
                                 "history debits credits debited credited"))
 BRAND_WORDS = frozenset(tokens("brand brands which most where going breakdown break split"))
 STATUS_LABEL = {"PAID": "paid", "UNPAID": "unpaid", "PARTIALLY_PAID": "partly paid",
                 "PARTIAL": "partly paid", "OVERDUE": "overdue"}
-
-
-def _month_window(year: int, month: int, today: date) -> Window:
-    start = date(year, month, 1)
-    end = date(year, month, calendar.monthrange(year, month)[1])
-    return Window(start, min(end, today), f"{start:%B %Y}", named=True)
-
-
-def period_from(text: str, chosen: str | None = None, today: date | None = None) -> Window | None:
-    """The window the user named - or chose from "Over what period?" - if any."""
-    today = today or _today_ist()
-    said = normalise(text)
-    if chosen == "this_month" or "this month" in said:
-        return Window(today.replace(day=1), today, "this month")
-    if chosen == "last_month" or "last month" in said or "previous month" in said:
-        prev = today.replace(day=1) - timedelta(days=1)
-        return _month_window(prev.year, prev.month, today)
-    if chosen == "last_30_days" or re.search(r"\b(last|past) 30 days\b", said):
-        return Window(today - timedelta(days=29), today, "the last 30 days", rolling=True)
-    words = said.split()
-    for i, w in enumerate(words):
-        # "may" is a month only as "in May", "for May" or with a year - not "may I see".
-        if w in _MONTHS and (w != "may" or (i and words[i - 1] in ("in", "of", "for"))
-                             or _YEAR.search(text)):
-            month = _MONTHS[w]
-            year = int(m.group(1)) if (m := _YEAR.search(text)) else (
-                today.year if month <= today.month else today.year - 1)
-            return _month_window(year, month, today)
-    return None
 
 
 def spending_kind(text: str) -> str:
@@ -286,12 +250,3 @@ def owed_answer(got: Owed, fallback: Bills | None = None) -> LiveAnswer:
                    caveat="Invoices are what AdGrid bills you: revenue share and screen rental, "
                           "with GST.")
 
-
-def recent_months(today: date | None = None, n: int = FALLBACK_MONTHS) -> list[date]:
-    """The last n months, this one included, newest first."""
-    m = (today or _today_ist()).replace(day=1)
-    out = []
-    for _ in range(n):
-        out.append(m)
-        m = (m - timedelta(days=1)).replace(day=1)
-    return out

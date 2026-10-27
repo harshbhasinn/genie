@@ -23,7 +23,8 @@ import pytest
 from genie.chat.responder import Responder
 from genie.ontology import load
 from genie.data.fields import today as _today
-from genie.router.live_spending import period_from, spending_kind
+from genie.router.live_spending import spending_kind
+from genie.router.periods import period_from, without_period
 from .test_campaigns import client_for, envelope, run, session
 
 REPO = Path(__file__).resolve().parents[2]
@@ -207,3 +208,11 @@ def test_a_campaign_manager_is_not_shown_the_agency_invoice(ontology):
     blocks = run(Responder(ontology, None, bff=client_for(FakeWallet({}))),
                  wallet_session(role="CAMPAIGN_MANAGER"), "do I have any unpaid invoices")
     assert blocks[0].meta["denied"] is True
+
+
+def test_the_period_plays_no_part_in_routing():
+    assert without_period("how is my brand doing all time") == "how is my brand doing"
+    assert without_period("what did we spend last month") == "what did we spend"
+    assert without_period("spend in september 2026 by brand") == "spend by brand"
+    assert without_period("brand performance over the last 7 days") == "brand performance"
+    assert without_period("may i see my spending") == "may i see my spending"      # "may" the verb
