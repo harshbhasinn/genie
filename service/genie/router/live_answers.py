@@ -41,6 +41,11 @@ PROBLEM_TEXT = {
 MAX_LISTED = 5            # names said in a sentence, or offered in "Which campaign?"
 
 
+def and_list(items: list[str]) -> str:
+    """ "Delhi", "Delhi and Noida", "Delhi, Noida and Pune"."""
+    return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " and " + items[-1]
+
+
 def between(window: tuple[date, date] | None) -> str:
     """ "between 16 Oct 2026 and 20 Oct 2026", or "so far" when the response gave no window."""
     return f"between {day(window[0])} and {day(window[1])}" if window else "so far"

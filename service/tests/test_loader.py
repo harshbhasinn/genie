@@ -26,7 +26,9 @@ def test_loads_the_real_ontology(ontology):
     # 260: the AdGuide chip "explain my wallet position" and three overview phrasings
     # on wallet.explain_balance (it was routing to navigate.wallet). 343: the live
     # capabilities - campaigns, approvals, spending, invoices - and their phrasings.
-    assert stats["utterances"] == 343
+    # 345: a named brand in the form the router reads it - "how is my brand doing",
+    # "who manages my brand" - beside the Coca-Cola examples.
+    assert stats["utterances"] == 345
     assert stats["metrics"] > 90
 
 

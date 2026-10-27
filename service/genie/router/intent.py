@@ -106,7 +106,7 @@ class IntentRouter:
                     permissions: frozenset[str]) -> bool:
         """Can this user actually use it? Ranking, not filtering.
 
-        UNKNOWN is still not DENIED: an empty permission set - no /api/v1/me read, or
+        UNKNOWN is still not DENIED: an empty permission set - no `me` read, or
         a vocabulary the catalog does not use - must mean "not asked yet".
         """
         if roles and not cap.role_allowed(roles):

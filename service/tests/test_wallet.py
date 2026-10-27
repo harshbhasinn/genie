@@ -425,6 +425,7 @@ def cm_session() -> Session:
     s.context = UIContext(screen="command_centre", role="CAMPAIGN_MANAGER", client_id=CLIENT)
     s.identity = Identity("u-cm", "CM", "CAMPAIGN_MANAGER", CLIENT,
                           (Grant(CLIENT, "Infinity", "CAMPAIGN_MANAGER", frozenset({"VIEW_MEMBER_WALLET"})),))
+    s.names_read_for = CLIENT         # past session start: only this test's reads
     return s
 
 

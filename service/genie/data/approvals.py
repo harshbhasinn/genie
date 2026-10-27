@@ -2,18 +2,18 @@
 
 Lists, called exactly as the approvals page of the AdOps dashboard on QA calls them
 (the same BFF; the agency Partner Hub's frontend was not available to read):
-  waiting for me    GET /api/v1/approvals/queue?view=AWAITING_ME&status=PENDING
-                    - rows where myVerdict is set are already decided by me (the
-                      screen's own pending count drops them the same way)
-  failed after OK   GET /api/v1/approvals/queue?view=AWAITING_ME&status=EXECUTION_FAILED
-  decided by me     GET /api/v1/approvals/queue?view=DECIDED_BY_ME
-  raised by me      GET /api/v1/approvals/mine?status=...
+  waiting for me     approvals.queue          view=AWAITING_ME, status=PENDING
+                     - rows where myVerdict is set are already decided by me (the
+                       screen's own pending count drops them the same way)
+  failed after OK    approvals.queue          view=AWAITING_ME, status=EXECUTION_FAILED
+  decided by me      approvals.queue          view=DECIDED_BY_ME
+  raised by me       approvals.mine           status=...
 One request:
-  in full           GET /api/v1/approvals/{referenceCode}       trail[], stage, deadline, failure
-  what changed      GET /api/v1/approvals/{referenceCode}/preview-today   requested, today, delta
+  in full            approvals.detail         trail[], stage, deadline, failure
+  what changed       approvals.preview_today  requested, today, delta
 The rules:
-  deadlines, timeout GET /api/v1/clients/{clientId}/approval-automation      per operation
-  who approves       GET /api/v1/approval-configs                           stages[].roles
+  deadlines, timeout approvals.automation     per operation
+  who approves       approvals.configs        stages[].roles
 
 The enums are not in the spec; these are the values the dashboard sends and labels
 (and ag-common-util's ApprovalStatus / ApprovalTrailEvent / OnTimeout / TerminalReason on QA):
@@ -37,15 +37,16 @@ from dataclasses import dataclass, field
 from datetime import date
 
 from ..bff import BffClient, BffError
+from ..bff.endpoints import endpoint
 from ..roles import is_campaign_manager
 from .fields import day, from_epoch_ms, humanize
 
-QUEUE = "/api/v1/approvals/queue"
-MINE = "/api/v1/approvals/mine"
-DETAIL = "/api/v1/approvals/{referenceCode}"
-PREVIEW = "/api/v1/approvals/{referenceCode}/preview-today"
-AUTOMATION = "/api/v1/clients/{clientId}/approval-automation"
-CONFIGS = "/api/v1/approval-configs"
+QUEUE = endpoint("approvals.queue")
+MINE = endpoint("approvals.mine")
+DETAIL = endpoint("approvals.detail")
+PREVIEW = endpoint("approvals.preview_today")
+AUTOMATION = endpoint("approvals.automation")
+CONFIGS = endpoint("approvals.configs")
 PAGE_SIZE = 100
 MAX_PAGES = 5                       # 500 requests: past that, counts say "at least"
 

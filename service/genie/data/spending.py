@@ -1,11 +1,11 @@
 """Where the agency's money went, and what it owes - read live as the admin.
 
 Sources (live spec; the AdOps dashboard on QA calls the same paths):
-  spend by brand      GET /api/v1/clients/{clientId}/wallet/spending-analysis   brands[], totals
-  month by month      GET /api/v1/clients/{clientId}/wallet/consumption/monthly rows[]
-  ledger lines        GET /api/v1/clients/{clientId}/wallet/statement           lines[]
-  what is owed        GET /api/v1/clients/{clientId}/wallet/settlements/summary
-  one month's bill    GET /api/v1/clients/{clientId}/wallet/settlements?months=
+  spend by brand      wallet.spend_by_brand  brands[], totals
+  month by month      wallet.monthly         rows[]
+  ledger lines        wallet.statement       lines[]
+  what is owed        wallet.owed
+  one month's bill    wallet.bills           ?months=
 
 The screen's Transaction History is /wallet/transactions, but its row type in the
 spec is "Row" - one name shared by 16 different responses, so the contract does not
@@ -33,14 +33,15 @@ from datetime import date
 from decimal import Decimal
 
 from ..bff import BffClient, BffError
-from .fields import humanize, parse_date, parse_month, to_int, window_of
+from ..bff.endpoints import endpoint
+from .fields import Window, humanize, parse_date, parse_month, to_int, window_of
 from .money import to_decimal
 
-SPEND_BY_BRAND = "/api/v1/clients/{clientId}/wallet/spending-analysis"
-MONTHLY = "/api/v1/clients/{clientId}/wallet/consumption/monthly"
-STATEMENT = "/api/v1/clients/{clientId}/wallet/statement"
-OWED = "/api/v1/clients/{clientId}/wallet/settlements/summary"
-SETTLEMENTS = "/api/v1/clients/{clientId}/wallet/settlements"
+SPEND_BY_BRAND = endpoint("wallet.spend_by_brand")
+MONTHLY = endpoint("wallet.monthly")
+STATEMENT = endpoint("wallet.statement")
+OWED = endpoint("wallet.owed")
+SETTLEMENTS = endpoint("wallet.bills")
 
 PAGE_SIZE = 50
 # LedgerEntryType (ag-billing-service on QA). Anything else is humanized.
@@ -72,18 +73,6 @@ def _charges(raw) -> list[tuple[str, Decimal]]:
         if (amount := to_decimal(value)) is not None:
             out.append((_label(CHARGE_LABEL, code), amount))
     return out
-
-
-@dataclass(frozen=True, slots=True)
-class Window:
-    start: date
-    end: date
-    label: str                      # "this month", "September 2026", "the last 30 days"
-    named: bool = False             # a calendar month the user named ("September", "last month")
-    rolling: bool = False           # a span of days, not a calendar month ("the last 30 days")
-
-    def params(self) -> dict:
-        return {"from": self.start.isoformat(), "to": self.end.isoformat()}
 
 
 async def _get(bff: BffClient, token: str, path: str, client_id: str, params: dict | None = None):

@@ -15,6 +15,7 @@ answer says so and still explains what the number means.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from collections.abc import AsyncIterator
@@ -24,8 +25,9 @@ from ..bff import BffClient
 from ..data.money import unexplained_numbers
 from ..data.approvals import (approval_rules, awaiting_me, campaign_requests, decided_by_me,
                               failed_after_approval, preview_today, raised_by_me, request_detail)
-from ..data.brands import list_brands
+from ..data.brands import brand_contacts, brand_stats, list_brands, many_brand_stats
 from ..data.campaigns import (campaign_breakdown, campaign_dayparts, campaign_gender, campaign_view,
+                              launch_check,
                               list_campaigns, one_campaign)
 from ..data.spending import bills, ledger, monthly, owed, spend_by_brand
 from ..data.wallet import agency_wallet, my_subwallet
@@ -39,19 +41,24 @@ from ..router import answers as build
 from ..router.followups import decide as decide_follow_up
 from ..router.intent import IntentRouter
 from ..router.lexical import normalise
-from ..router.live_answers import WALLET_CAPS, LiveAnswer, is_overview, wallet_answer
+from ..router.live_answers import WALLET_CAPS, LiveAnswer, is_overview, text_answer, wallet_answer
 from ..router.live_approvals import (APPROVAL_CAPS, HISTORY_CAP, REQUEST_CAPS, RULES_CAP,
                                      approvals_answer, history_answer, no_requests, operation_named,
                                      pick_request, rules_answer, status_answer, what_changed_answer,
                                      which_request_block)
-from ..router.live_brands import BRAND_CAPS, brand_link_answer, pick_brand, which_brand_block
-from ..router.live_campaigns import (ACTION_STATES, CAMPAIGN_CAPS, ONE_CAMPAIGN, action_answer,
+from ..router.live_brands import (BRAND_CAPS, BRAND_LINKS, MAX_RANKED, asks_for_ranking,
+                                  brand_link_answer, brand_list_answer, brand_stats_answer,
+                                  contacts_answer, no_brands, pick_brand, ranked_answer,
+                                  which_brand_block)
+from ..router.live_campaigns import (ACTION_STATES, CAMPAIGN_CAPS, ELIGIBLE, LAUNCH_CAP,
+                                     ONE_CAMPAIGN, action_answer, launch_answer,
                                      audience_answer, breakdown_answer, daypart_answer, group_named,
                                      list_answer, names_a_state, none_to_show, pacing_answer,
                                      performance_answer, pick_campaign, which_campaign_block)
-from ..router.live_spending import (INVOICE_CAP, SPENDING_CAP, bill_answer, brands_answer,
-                                    ledger_answer, month_answer, owed_answer, period_from,
-                                    recent_months, spending_kind)
+from ..router.live_spending import (FALLBACK_MONTHS, INVOICE_CAP, SPENDING_CAP, bill_answer,
+                                    brands_answer, ledger_answer, month_answer, owed_answer,
+                                    spending_kind)
+from ..router.periods import all_time, period_from, recent_months, without_period
 from .session import Session, UIContext
 
 log = logging.getLogger(__name__)
@@ -269,6 +276,7 @@ class Responder:
                 return
             text = f"{text} ({cap.label})"   # otherwise fall through with the choice in view
 
+        await self._learn_names(session, token)
         route = await self._router.route(self._as_routed(session, text), screen=ctx.screen,
                                          roles=roles, permissions=permissions)
         yield Block("capability", route.capability.id if route.routed else "",
@@ -359,15 +367,35 @@ class Responder:
         async for block in self._narrate(session, text, ctx, facts):
             yield block
 
+    async def _learn_names(self, session: Session, token: str | None) -> None:
+        """The user's own campaign and brand names, read once per session before the first
+        question is routed - so "how is Monsoon Malabar doing" routes as a question about a
+        brand from the first turn, not only after a list has been shown. A read that fails
+        leaves routing as it was."""
+        if not self._can_read(session, token):
+            return
+        grant = session.identity.grant_for(session.context.client_id)
+        if grant is None or session.names_read_for == grant.client_id:
+            return
+        session.names_read_for = grant.client_id
+        campaigns, brands = await asyncio.gather(list_campaigns(self._bff, token, grant.client_id),
+                                                 list_brands(self._bff, token, grant.client_id))
+        session.remember("campaign", (c.name for c in campaigns.campaigns))
+        session.remember("brand", (b.name for b in brands.brands))
+
     @staticmethod
     def _as_routed(session: Session, text: str) -> str:
-        """The words with each known name read as what it is: "how is GENIE TEST - approval
-        flow doing" routes as "how is my campaign doing", not as a question about
-        approvals. Picking WHICH campaign still reads the user's own words."""
+        """The words as routing should read them. Each known name is read as what it is:
+        "how is GENIE TEST - approval flow doing" routes as "how is my campaign doing", not
+        as a question about approvals, and "open the Monsoon Sale campaign" as "open my
+        campaign". The period is dropped: it is what a question is asked over, not what it
+        is about. Picking WHICH campaign, and over what period, still reads the user's own
+        words."""
         said = normalise(text)
         for name, kind in sorted(session.entities.items(), key=lambda e: -len(e[0])):
             if (n := normalise(name)) and re.search(rf"\b{re.escape(n)}\b", said):
-                said = re.sub(rf"\b{re.escape(n)}\b", f"my {kind}", said)
+                said = re.sub(rf"\b(?:the |my |this )?{re.escape(n)}(?: {kind})?\b", f"my {kind}", said)
+        said = without_period(said)
         return said if said != normalise(text) else text
 
     # ── live answers ───────────────────────────────────────────────────
@@ -489,7 +517,7 @@ class Responder:
         if window and window.named:
             return bill_answer(await bills(self._bff, token, cid, [window.start]), window)
         got = await owed(self._bff, token, cid)
-        fallback = (await bills(self._bff, token, cid, recent_months())
+        fallback = (await bills(self._bff, token, cid, recent_months(FALLBACK_MONTHS))
                     if got.problem in ("forbidden", "not_found") else None)
         return owed_answer(got, fallback)
 
@@ -514,7 +542,7 @@ class Responder:
         ctx = session.context
         on_screen = ctx.selected_entity if ctx.screen == "campaign_detail" else None
         pick = pick_campaign(text, listing, chosen_id=chosen, on_screen_id=on_screen,
-                             eligible=ACTION_STATES.get(cap.id))
+                             eligible=ELIGIBLE.get(cap.id))
         campaign = pick.campaign
         if campaign is None and pick.wanted_id:
             got = await one_campaign(self._bff, token, pick.wanted_id)
@@ -531,8 +559,15 @@ class Responder:
             else:
                 yield action_answer(cap.id, cap.refusal or "", campaign, listing)
             return
+        if cap.id == LAUNCH_CAP and campaign is None and not pick.wanted_id and listing.campaigns:
+            yield text_answer("Campaigns", "None of your campaigns is a draft, so nothing is waiting "
+                                           "to launch.", authored=True)
+            return
         if campaign is None:
             yield none_to_show(listing, one=bool(pick.wanted_id))
+            return
+        if cap.id == LAUNCH_CAP:
+            yield launch_answer(campaign, await launch_check(self._bff, token, campaign))
             return
         if cap.id == "campaign.explain_audience":
             yield audience_answer(campaign, await campaign_gender(self._bff, token, campaign))
@@ -582,16 +617,46 @@ class Responder:
                                 request.reference)
 
     async def _brands(self, session, text, cap, token, grant, identity, chosen):
-        """Yields one LiveAnswer - or one follow_up Block when it must ask which brand."""
-        screen = self._ontology.screen(cap.target_screen)
-        got = await list_brands(self._bff, token, grant.client_id, identity.user_id, grant.role)
+        """Yields one LiveAnswer - or a follow_up Block when it must ask which brand, or over
+        what period."""
+        got = await list_brands(self._bff, token, grant.client_id)
         session.remember("brand", (b.name for b in got.brands))
-        brand, options = pick_brand(text, got, chosen_id=chosen,
-                                    on_screen_id=session.context.brand_id)
-        if brand is None and options and len(options) > 1:
+        if cap.id == "brand.list":
+            yield brand_list_answer(got)
+            return
+        ranking = cap.id == "brand.explain_performance" and asks_for_ranking(text, got)
+        brand, options = (None, []) if ranking else pick_brand(
+            text, got, chosen_id=chosen, on_screen_id=session.context.brand_id)
+        if brand is None and len(options) > 1:
             yield _ask(session, text, cap.id, which_brand_block(options))
             return
-        yield brand_link_answer(screen.id, screen.title, screen.route, brand, got)
+        if cap.id in BRAND_LINKS:
+            screen = self._ontology.screen(cap.target_screen)
+            yield brand_link_answer(screen.id, screen.title, screen.route, brand, got)
+            return
+        if brand is None and not ranking:
+            yield no_brands(got)
+            return
+        if cap.id == "brand.explain_contacts":
+            yield contacts_answer(brand, await brand_contacts(self._bff, token, brand.id))
+            return
+        # How a brand is doing: over the period named - or asked once, as the catalog says.
+        window = None if all_time(text, chosen) else period_from(text, chosen)
+        if window is None and not all_time(text, chosen):
+            picked = frozenset(f.id for f in cap.follow_ups if f.kind == "entity_choice")  # the brand
+            ask = decide_follow_up(cap, screen=session.context.screen, query=text, asked=session.asked,
+                                   already_known=picked)
+            if ask is not None:
+                session.asked[ask.follow_up.id] = session.asked.get(ask.follow_up.id, 0) + 1
+                yield _ask(session, text, cap.id, ask.as_block())
+                return
+            default = next((f.default_after_asks for f in cap.follow_ups if f.kind == "scope"), None)
+            window = period_from("", default)       # asked already: the catalog's default
+        if ranking:
+            ranked = got.brands[:MAX_RANKED]
+            yield ranked_answer(got, await many_brand_stats(self._bff, token, ranked, window), window)
+        else:
+            yield brand_stats_answer(brand, await brand_stats(self._bff, token, brand.id, window), window)
 
     async def _words(self, session: Session, text: str,
                      answer: LiveAnswer) -> tuple[str, str, list[str]]:

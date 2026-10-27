@@ -5,11 +5,25 @@ day are both taken in Asia/Kolkata, never in the container's UTC.
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 
 from .money import to_decimal
 
 IST = timezone(timedelta(hours=5, minutes=30))
+
+
+@dataclass(frozen=True, slots=True)
+class Window:
+    """The days a question is about, as the BFF takes them."""
+    start: date
+    end: date
+    label: str                      # "this month", "September 2026", "the last 30 days"
+    named: bool = False             # a calendar month the user named ("September", "last month")
+    rolling: bool = False           # a span of days, not a calendar month ("the last 30 days")
+
+    def params(self) -> dict:
+        return {"from": self.start.isoformat(), "to": self.end.isoformat()}
 
 
 def today() -> date:

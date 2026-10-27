@@ -168,6 +168,16 @@ behaviour from `/clients/{clientId}/approval-automation` and leaves approvers ou
 
 ---
 
+## 9 · Client detail ignores `sections`
+
+`GET /api/v1/clients/{clientId}?sections=CLIENT_INFO` returns all eight sections — batch rates,
+credit balance, contract — on QA (2026-10-27). The value is validated (`sections=clientInfo` is a
+400), but not applied. AdGuide reads only five contact fields from `clientInfo`, so nothing leaks
+into an answer; the rates and credit still travel to it.
+- [ ] Return only the requested sections
+
+---
+
 ## Already answered from the contracts — listed so you can correct us
 
 | | What we concluded | From |

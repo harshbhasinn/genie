@@ -1,7 +1,7 @@
 """Who is asking, according to the BFF rather than according to the browser.
 
 ui_context.role and ui_context.client_id are HINTS. Anyone can send
-{"role": "AD_PARTNER_ADMIN"}. Once a token is present, GET /api/v1/me is the
+{"role": "AD_PARTNER_ADMIN"}. Once a token is present, the `me` endpoint is the
 authority: it returns the user's grants, and each grant names a client, a role
 and that role's permissions. Genie takes its role, client and permissions from
 there and only from there.
@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from ..bff import BffClient
+from ..bff.endpoints import endpoint
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,7 +49,7 @@ class Identity:
 
 
 async def whoami(bff: BffClient, token: str) -> Identity:
-    data = (await bff.get("/api/v1/me", token=token)).data or {}
+    data = (await bff.get(endpoint("me"), token=token)).data or {}
     grants = tuple(
         Grant(client_id=str(g.get("clientId")), client_name=g.get("clientName"),
               role=str(g.get("role") or ""), permissions=frozenset(g.get("permissions") or ()))
