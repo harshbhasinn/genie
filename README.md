@@ -110,8 +110,13 @@ python -m uvicorn genie.main:app --reload --port 9030
 python -m pytest tests -q       # 18 tests, no API key needed
 ```
 
-`GET /healthz` reports the loaded ontology, the configured model, session count and — the thing
-you will actually want — **whether the BFF token has expired**, since QA tokens live five minutes.
+`GET /healthz` reports the loaded ontology, the configured model, the session store (memory, or
+Redis with whether it is reachable) and — the thing you will actually want — **whether the BFF
+token has expired**, since QA tokens live five minutes.
+
+Sessions live in this process's memory unless `GENIE_REDIS_URL` is set; then every Genie instance
+shares them through Redis (`docker compose up -d redis` for a local one). Either way a session is
+stored under the user the BFF verified, so one user's conversation can never load for another.
 
 ```bash
 curl -N -X POST http://127.0.0.1:9030/v1/genie/chat   -H 'Content-Type: application/json'   -d '{"message":"what is my wallet balance",
