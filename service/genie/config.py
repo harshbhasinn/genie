@@ -75,6 +75,12 @@ class Settings(BaseSettings):
     # dashboard's requests. Without it the BFF answers PORTAL_ID_REQUIRED.
     genie_bff_portal_id: str = ""
 
+    # ── sessions and short-lived caches ───────────────────────────────
+    # Unset: this process's memory (one Genie process). Set: Redis, shared by every Genie
+    # task - redis://:password@host:port/db, or rediss:// for TLS.
+    genie_redis_url: SecretStr = SecretStr("")
+    genie_session_ttl_s: int = 3600
+
     # ── pgvector (not used until end of S2) ────────────────────────────
     genie_pg_dsn: SecretStr = SecretStr("")
 
@@ -147,6 +153,7 @@ class Settings(BaseSettings):
             "bff_mode": self.genie_bff_mode,
             "bff_base": self.bff_base,
             "pg_configured": bool(self.genie_pg_dsn.get_secret_value()),
+            "redis_configured": bool(self.genie_redis_url.get_secret_value()),
         }
 
 

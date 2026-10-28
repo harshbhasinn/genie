@@ -8,10 +8,16 @@ there and only from there.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass
 
 from ..bff import BffClient
 from ..bff.endpoints import endpoint
+from ..store import KeyValue
+from .tokens import decode
+
+ME_TTL_S = 300                        # one `me` read per token per 5 minutes, across every task
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,6 +53,18 @@ class Identity:
             return Grant(self.home_client_id, None, self.primary_role or "", frozenset())
         return None
 
+    def to_dict(self) -> dict:
+        return {"user_id": self.user_id, "name": self.name, "primary_role": self.primary_role,
+                "home_client_id": self.home_client_id,
+                "grants": [[g.client_id, g.client_name, g.role, sorted(g.permissions)]
+                           for g in self.grants]}
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "Identity":
+        return cls(user_id=d["user_id"], name=d["name"], primary_role=d["primary_role"],
+                   home_client_id=d["home_client_id"],
+                   grants=tuple(Grant(c, n, r, frozenset(p)) for c, n, r, p in d["grants"]))
+
 
 async def whoami(bff: BffClient, token: str) -> Identity:
     data = (await bff.get(endpoint("me"), token=token)).data or {}
@@ -57,3 +75,24 @@ async def whoami(bff: BffClient, token: str) -> Identity:
     return Identity(user_id=str(data.get("userId") or ""), name=data.get("name"),
                     primary_role=data.get("primaryRole"),
                     home_client_id=data.get("clientId"), grants=grants)
+
+
+async def whoami_cached(kv: KeyValue, bff: BffClient, token: str, prefix: str = "genie:") -> Identity:
+    """`me` for this token, read once per token per few minutes and shared by every task.
+
+    Keyed by a hash of the token - the token itself is never stored - and never kept
+    past the token's own expiry, so a cached identity can only be the identity the BFF
+    gave for exactly this token. A BffError propagates: no identity is ever guessed."""
+    key = f"{prefix}me:{hashlib.sha256(token.encode()).hexdigest()}"
+    raw = await kv.get(key)
+    if raw is not None:
+        try:
+            return Identity.from_dict(json.loads(raw))
+        except (ValueError, KeyError, TypeError):
+            pass
+    identity = await whoami(bff, token)
+    info = decode(token)
+    ttl = ME_TTL_S if info is None or info.expires_in is None else min(ME_TTL_S, info.expires_in)
+    if ttl > 0 and identity.user_id:
+        await kv.set(key, json.dumps(identity.to_dict(), ensure_ascii=False), ttl)
+    return identity
