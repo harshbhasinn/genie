@@ -1,0 +1,29 @@
+{
+  "_note": "DEMO DATA for local runs only - not real contracts, rates or reach. The four rows of the worked example in design/calculator/availability-api-spec.md section 10. Config refuses this source outside GENIE_ENV=local.",
+  "ratesVersion": "demo-rates-1",
+  "reachVersion": "demo-reach-1",
+  "rows": [
+    {"contractId": "demo-k-del-1", "contractCode": "K-DEL-1", "city": "DEL", "cityName": "Delhi",
+     "category": "GROCERY", "daypart": "EVENING", "totalDevices": 4,
+     "pattern": [4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 0, 0, 0, 0, 0],
+     "imageSlotRatePerMonth": "1000.00", "videoSlotRatePerMonth": "1800.00"},
+    {"contractId": "demo-k-del-1", "contractCode": "K-DEL-1", "city": "DEL", "cityName": "Delhi",
+     "category": "GROCERY", "daypart": "MORNING", "totalDevices": 4,
+     "pattern": [4],
+     "imageSlotRatePerMonth": "900.00", "videoSlotRatePerMonth": "1600.00"},
+    {"contractId": "demo-k-noi-1", "contractCode": "K-NOI-1", "city": "NOI", "cityName": "Noida",
+     "category": "PHARMACY", "daypart": "MORNING", "totalDevices": 6,
+     "pattern": [6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 0, 0, 0, 0, 0],
+     "imageSlotRatePerMonth": "800.00", "videoSlotRatePerMonth": "1400.00"},
+    {"contractId": "demo-k-ggn-1", "contractCode": "K-GGN-1", "city": "GGN", "cityName": "Gurgaon",
+     "category": "DAIRY", "daypart": "EVENING", "totalDevices": 10,
+     "pattern": [10],
+     "imageSlotRatePerMonth": "1200.00", "videoSlotRatePerMonth": "2000.00"}
+  ],
+  "reach": [
+    {"city": "DEL", "category": "GROCERY", "daypart": "EVENING", "dailyReachPerDevice": 120},
+    {"city": "DEL", "category": "GROCERY", "daypart": "MORNING", "dailyReachPerDevice": 90},
+    {"city": "NOI", "category": "PHARMACY", "daypart": "MORNING", "dailyReachPerDevice": 80},
+    {"city": "GGN", "category": "DAIRY", "daypart": "EVENING", "dailyReachPerDevice": 100}
+  ]
+}

@@ -14,8 +14,10 @@ import sys
 import time
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from .auth import tokens as token_auth
 from .bff import BffClient
@@ -25,6 +27,10 @@ from .chat.session import SessionStore
 from .config import settings
 from .llm import build as build_provider
 from .ontology import OntologyError, load
+from .planner.cache import PlanningInputs
+from .planner.engine import Planner
+from .planner.router import router as plan_router
+from .planner.source import build as build_plan_source
 from .store import build as build_store
 
 log = logging.getLogger("genie")
@@ -77,6 +83,17 @@ async def lifespan(app: FastAPI):
                                       ttl_s=cfg.genie_session_ttl_s)
     app.state.responder = Responder(ontology, provider, bff=bff,
                                     live_wording=cfg.genie_live_wording)
+    # The calculator: solver processes (started at boot, scipy loaded once each)
+    # and its inputs, cached in the same store as sessions. Plans themselves are never stored.
+    app.state.planner = Planner(cfg.genie_plan_workers,
+                                max_in_flight=cfg.genie_plan_max_in_flight,
+                                per_user_per_min=cfg.genie_plan_per_user_per_min)
+    plan_source = build_plan_source(cfg.genie_plan_source)
+    if plan_source is not None:
+        app.state.planner.warm()
+    app.state.plan_inputs = (PlanningInputs(app.state.sessions.kv, plan_source,
+                                            prefix=app.state.sessions.prefix)
+                             if plan_source is not None else None)
 
     log.info("ready on http://%s:%s | responder=%s | bff=%s",
              cfg.genie_host, cfg.genie_port, app.state.responder.mode,
@@ -88,6 +105,7 @@ async def lifespan(app: FastAPI):
             await provider.close()
         if bff is not None:
             await bff.close()
+        app.state.planner.close()
         await app.state.sessions.kv.close()
         log.info("stopped")
 
@@ -99,13 +117,29 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Local dev only. Production pins this to the dashboard origin.
-app.add_middleware(
-    CORSMiddleware, allow_origins=["*"], allow_methods=["GET", "POST"],
-    allow_headers=["*"],
-)
+# Which browser origins may call Genie: GENIE_CORS_ORIGINS. Read at import, because
+# middleware is fixed before the app starts. Retry-After is exposed so a browser can read
+# how long to wait after a 429 or 503.
+_cors = settings().cors_origins
+if _cors:
+    app.add_middleware(
+        CORSMiddleware, allow_origins=list(_cors), allow_methods=["GET", "POST"],
+        allow_headers=["Authorization", "Content-Type"], expose_headers=["Retry-After"],
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def invalid_request(request: Request, exc: RequestValidationError) -> JSONResponse:
+    """Every refusal has one shape: {code, message, retryable}, plus the fields at fault.
+    The request body is never echoed back."""
+    fields = [{"field": ".".join(str(p) for p in e.get("loc", ()) if p != "body"),
+               "problem": e.get("msg", "invalid")} for e in exc.errors()]
+    return JSONResponse({"code": "INVALID_REQUEST",
+                         "message": "Some fields are missing or invalid.",
+                         "retryable": False, "fields": fields}, status_code=422)
 
 app.include_router(chat_router)
+app.include_router(plan_router)
 
 
 @app.get("/healthz", tags=["ops"])
@@ -145,6 +179,8 @@ async def healthz() -> dict:
         "ontology": ontology.stats,
         "responder": app.state.responder.mode,
         "sessions": await app.state.sessions.kv.health(),
+        "planner": {"source": cfg.genie_plan_source, "connected": app.state.plan_inputs is not None,
+                    "workers": app.state.planner.workers, "in_flight": app.state.planner.in_flight},
         "token": token_state,
     }
 

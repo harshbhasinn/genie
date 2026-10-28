@@ -110,11 +110,11 @@ def ontology():
                                   "http://ag-dashboard-bff.qa.adgrid.ai"])
 def test_config_refuses_anything_but_qa(base):
     with pytest.raises(ValueError, match="QA only"):
-        Settings(_env_file=None, genie_bff_base=base)
+        Settings(_env_file=None, genie_env="local", genie_bff_base=base)
 
 
 def test_config_accepts_qa():
-    assert Settings(_env_file=None, genie_bff_base=QA + "/").genie_bff_base == QA
+    assert Settings(_env_file=None, genie_env="local", genie_bff_base=QA + "/").genie_bff_base == QA
 
 
 def test_client_refuses_anything_but_qa():
@@ -327,8 +327,8 @@ def test_endpoint_takes_role_and_client_from_me_not_the_browser(ontology):
         r = c.post("/v1/genie/chat", headers={"Authorization": f"Bearer {TOKEN}"}, json={
             "message": "explain my wallet position",
             # A browser claiming another client: ignored in favour of the user's own grant.
-            "ui_context": {"screen": "command_centre", "role": "CAMPAIGN_MANAGER",
-                           "client_id": "someone-else"}})
+            "uiContext": {"screen": "command_centre", "role": "CAMPAIGN_MANAGER",
+                           "clientId": "someone-else"}})
     assert r.status_code == 200 and "₹15,75,000" in r.text
     paths = [call.url.path for call in fake.calls]
     assert paths[0] == "/api/v1/me" and all("someone-else" not in p for p in paths)

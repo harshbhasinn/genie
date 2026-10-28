@@ -29,9 +29,9 @@ def turn(client: httpx.Client, base: str, message: str, *, screen: str | None,
          role: str, session_id: str | None, raw: bool) -> str | None:
     body = {"message": message}
     if session_id:
-        body["session_id"] = session_id
+        body["sessionId"] = session_id
     if screen or role:
-        body["ui_context"] = {"screen": screen, "role": role}
+        body["uiContext"] = {"screen": screen, "role": role}
 
     started = time.perf_counter()
     first_token_at: float | None = None
@@ -56,7 +56,7 @@ def turn(client: httpx.Client, base: str, message: str, *, screen: str | None,
                 data = json.loads(line[6:])
 
                 if event == "start":
-                    new_session = data["session_id"]
+                    new_session = data["sessionId"]
                     print(f"{DIM}session {new_session[:8]} · responder={data['mode']}{RESET}")
                 elif event == "block":
                     kind = data["type"]
@@ -66,7 +66,7 @@ def turn(client: httpx.Client, base: str, message: str, *, screen: str | None,
                         print(data["content"], end="", flush=True)
                     elif kind == "capability":
                         meta = data.get("meta") or {}
-                        otp = f" {YELLOW}[OTP-gated]{RESET}" if meta.get("otp_gated") else ""
+                        otp = f" {YELLOW}[OTP-gated]{RESET}" if meta.get("otpGated") else ""
                         print(f"{GREEN}▸ {data['content']}{RESET} "
                               f"{DIM}({meta.get('mode')}){RESET}{otp}")
                         if meta.get("follow_ups"):

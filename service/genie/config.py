@@ -8,7 +8,7 @@ from functools import lru_cache
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from pydantic import SecretStr, field_validator
+from pydantic import SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -34,7 +34,10 @@ class Settings(BaseSettings):
     genie_host: str = "127.0.0.1"
     genie_port: int = 9030
     genie_log_level: str = "info"
-    genie_env: str = "local"
+    # REQUIRED - no default. "local" allows things a deployment must never do (dev tokens
+    # from secrets/, any origin, demo data), so forgetting it must stop the service rather
+    # than quietly make it local.
+    genie_env: str
     genie_ontology_root: Path = REPO_ROOT
 
     # ── LLM ────────────────────────────────────────────────────────────
@@ -81,6 +84,30 @@ class Settings(BaseSettings):
     genie_redis_url: SecretStr = SecretStr("")
     genie_session_ttl_s: int = 3600
 
+    # ── browser access ─────────────────────────────────────────────────
+    # Origins allowed to call Genie from a browser, comma-separated, e.g.
+    # https://dashboard.qa.adgrid.ai. Unset: "*" on a developer's machine, and NONE when
+    # deployed - a deployment names the dashboard's origin, it never allows every site.
+    genie_cors_origins: str = ""
+
+    # ── campaign calculator ───────────────────────────────────────────
+    # Where free screens, rates and reach come from: off (the endpoint answers 503) or
+    # fixture (demo data, LOCAL ONLY). The backend's endpoints are added when their
+    # contract is shared - see design/calculator/availability-api-spec.md.
+    genie_plan_source: str = "off"
+    # Solver processes. One per vCPU the task has: os.cpu_count() reports the HOST's
+    # cores inside a container, not the task's share, so it is set, never guessed.
+    genie_plan_workers: int = 1
+    # Plans running or waiting in this task before new ones are told to retry (503).
+    genie_plan_max_in_flight: int = 4
+    genie_plan_per_user_per_min: int = 10
+    # Each solve (plan 1; then the alternatives) must be PROVEN within this, or the user
+    # is told to try again - an unproven plan is never shown.
+    genie_plan_time_limit_s: float = 3.0
+    genie_plan_max_window_days: int = 90
+    # Alternatives are shown only within this % of plan 1's cost (or reach).
+    genie_plan_alternatives_within_pct: int = 10
+
     # ── pgvector (not used until end of S2) ────────────────────────────
     genie_pg_dsn: SecretStr = SecretStr("")
 
@@ -96,6 +123,43 @@ class Settings(BaseSettings):
         if v not in ("local", "qa", "prod"):
             raise ValueError("GENIE_ENV must be 'local', 'qa' or 'prod'")
         return v
+
+    @field_validator("genie_plan_source")
+    @classmethod
+    def _known_plan_source(cls, v: str) -> str:
+        v = v.strip().lower()
+        if v not in ("off", "fixture"):
+            raise ValueError("GENIE_PLAN_SOURCE must be 'off' or 'fixture'")
+        return v
+
+    @field_validator("genie_plan_workers", "genie_plan_max_in_flight", "genie_plan_per_user_per_min",
+                     "genie_plan_max_window_days")
+    @classmethod
+    def _positive(cls, v: int) -> int:
+        if v < 1:
+            raise ValueError("must be at least 1")
+        return v
+
+    @field_validator("genie_plan_time_limit_s")
+    @classmethod
+    def _time_limit(cls, v: float) -> float:
+        if not 0.5 <= v <= 30:
+            raise ValueError("GENIE_PLAN_TIME_LIMIT_S must be between 0.5 and 30 seconds")
+        return v
+
+    @field_validator("genie_plan_alternatives_within_pct")
+    @classmethod
+    def _within(cls, v: int) -> int:
+        if not 0 <= v <= 100:
+            raise ValueError("GENIE_PLAN_ALTERNATIVES_WITHIN_PCT must be 0 to 100")
+        return v
+
+    @model_validator(mode="after")
+    def _fixture_is_local_only(self):
+        # Demo prices must never be shown to a real user.
+        if self.genie_plan_source == "fixture" and self.genie_env != "local":
+            raise ValueError("GENIE_PLAN_SOURCE=fixture is demo data and only runs with GENIE_ENV=local")
+        return self
 
     @field_validator("genie_live_wording")
     @classmethod
@@ -135,6 +199,13 @@ class Settings(BaseSettings):
         return bool(self.gemini_api_key.get_secret_value() and self.genie_llm_model)
 
     @property
+    def cors_origins(self) -> tuple[str, ...]:
+        named = tuple(o.strip().rstrip("/") for o in self.genie_cors_origins.split(",") if o.strip())
+        if named:
+            return named
+        return ("*",) if self.genie_env == "local" else ()
+
+    @property
     def bff_base(self) -> str:
         """Admin mode uses its own base if one is set, else the same host."""
         if self.genie_bff_mode == "admin" and self.genie_bff_admin_base:
@@ -154,6 +225,9 @@ class Settings(BaseSettings):
             "bff_base": self.bff_base,
             "pg_configured": bool(self.genie_pg_dsn.get_secret_value()),
             "redis_configured": bool(self.genie_redis_url.get_secret_value()),
+            "cors_origins": list(self.cors_origins),
+            "plan_source": self.genie_plan_source,
+            "plan_workers": self.genie_plan_workers,
         }
 
 

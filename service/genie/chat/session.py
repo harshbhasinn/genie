@@ -32,8 +32,6 @@ log = logging.getLogger(__name__)
 MAX_TURNS = 20
 SESSION_TTL_S = 60 * 60
 KEY_PREFIX = "genie:"
-# A service with no BFF has no users to tell apart (local stub runs, tests): one owner.
-LOCAL_OWNER = "local"
 SESSION_ID = re.compile(r"[0-9a-f]{32}")                  # what uuid4().hex produces
 
 
