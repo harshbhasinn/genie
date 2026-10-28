@@ -19,6 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .auth import tokens as token_auth
 from .bff import BffClient
+from .calculator.api import router as calculator_router
 from .chat.responder import Responder
 from .chat.router import router as chat_router
 from .chat.session import SessionStore
@@ -106,6 +107,7 @@ app.add_middleware(
 )
 
 app.include_router(chat_router)
+app.include_router(calculator_router)
 
 
 @app.get("/healthz", tags=["ops"])

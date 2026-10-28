@@ -23,38 +23,13 @@ from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from ..auth.identity import Identity, whoami_cached
-from ..auth.tokens import bearer
-from ..bff import BffError
+from ..auth.identity import Identity
+from ..auth.request import identity_for, token_for
 from .responder import Responder
 from .session import LOCAL_OWNER, Session, SessionStore, UIContext
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/v1/genie", tags=["chat"])
-
-
-async def _token_for(request: Request) -> str | None:
-    """The user's own token: the dashboard's header in production, the dev file otherwise."""
-    forwarded = bearer(request.headers.get("authorization"))
-    if forwarded:
-        return forwarded
-    source = request.app.state.tokens
-    fresh = getattr(source, "fresh", None)
-    return await fresh() if fresh else source.token()
-
-
-async def _identity(request: Request, store: SessionStore, token: str | None) -> Identity | None:
-    """Who the BFF says this token belongs to - read through the `me` cache. None when
-    there is no BFF, no token, or the BFF would not say."""
-    bff = getattr(request.app.state, "bff", None)
-    if bff is None or not token:
-        return None
-    try:
-        identity = await whoami_cached(store.kv, bff, token, store.prefix)
-    except BffError as err:
-        log.info("whoami failed: %s", err.kind)
-        return None
-    return identity if identity.user_id else None
 
 
 def _owner(request: Request, identity: Identity | None) -> str | None:
@@ -117,8 +92,8 @@ async def chat(req: ChatRequest, request: Request) -> StreamingResponse:
     responder: Responder = request.app.state.responder
     store: SessionStore = request.app.state.sessions
 
-    token = await _token_for(request)
-    identity = await _identity(request, store, token)
+    token = await token_for(request)
+    identity = await identity_for(request, token)
     session = await store.load(_owner(request, identity), req.session_id)
     if req.ui_context:
         session.context = UIContext.parse(req.ui_context.model_dump())

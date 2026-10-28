@@ -108,10 +108,13 @@ capabilities:
     execution:
       state_changing: false
       method: POST
-      path: /v1/genie/plan
+      path: /v1/genie/calculator
       layer: genie
       pending: false
-      note: "Genie's own endpoint. Calls inventory and pricing beneath it."
+      note: >
+        Genie's own endpoint (calculator/api.py). Reads calculator-inputs beneath it - free slots
+        per screen group and the brand's rates - and prices the plan as billing does. The launch
+        wizard's own preview confirms the price; Genie never calls simulate-cost (CALCULATOR-INPUTS-API.md §5.3).
 
     gotchas:
       - >
