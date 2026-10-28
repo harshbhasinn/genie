@@ -57,7 +57,7 @@ def test_health_reports_real_state(client):
 def test_stream_is_well_formed(client):
     r = client.post("/v1/genie/chat", json={
         "message": "what is my wallet balance",
-        "ui_context": {"screen": "command_centre", "role": "AD_PARTNER_ADMIN"},
+        "uiContext": {"screen": "command_centre", "role": "AD_PARTNER_ADMIN"},
     })
     assert r.status_code == 200
     assert r.headers["content-type"].startswith("text/event-stream")
@@ -67,14 +67,14 @@ def test_stream_is_well_formed(client):
     assert evs[-1][0] == "done"
     assert evs[0][1]["mode"] == "stub"
     assert evs[-1][1]["blocks"] > 0
-    assert evs[-1][1]["latency_ms"] >= 0
+    assert evs[-1][1]["latencyMs"] >= 0
 
 
 def test_exact_utterance_routes_and_asks(client):
     """g001: three balances exist and the Command Centre names none, so it asks."""
     r = client.post("/v1/genie/chat", json={
         "message": "what is my wallet balance",
-        "ui_context": {"screen": "command_centre", "role": "AD_PARTNER_ADMIN"},
+        "uiContext": {"screen": "command_centre", "role": "AD_PARTNER_ADMIN"},
     })
     evs = events(r)
     caps = [d for n, d in evs if n == "block" and d["type"] == "capability"]
@@ -97,7 +97,7 @@ def test_same_words_on_the_answering_screen_do_not_ask(client):
     """
     r = client.post("/v1/genie/chat", json={
         "message": "what is my wallet balance",
-        "ui_context": {"screen": "wallet_management", "role": "AD_PARTNER_ADMIN"},
+        "uiContext": {"screen": "wallet_management", "role": "AD_PARTNER_ADMIN"},
     })
     evs = events(r)
     caps = [d for n, d in evs if n == "block" and d["type"] == "capability"]
@@ -109,13 +109,13 @@ def test_navigation_never_calls_the_model(client):
     """NAVIGATE has a 200 ms p95 budget. It emits a route, not a sentence."""
     r = client.post("/v1/genie/chat", json={
         "message": "take me to the wallet",
-        "ui_context": {"screen": "command_centre", "role": "AD_PARTNER_ADMIN"},
+        "uiContext": {"screen": "command_centre", "role": "AD_PARTNER_ADMIN"},
     })
     evs = events(r)
     nav = [d for n, d in evs if n == "block" and d["type"] == "navigate"]
     assert len(nav) == 1
     assert nav[0]["content"] == "/wallet-management"
-    assert nav[0]["meta"]["screen_id"] == "wallet_management"
+    assert nav[0]["meta"]["screenId"] == "wallet_management"
     assert not [d for n, d in evs if n == "block" and d["type"] == "token"]
 
 
@@ -123,11 +123,11 @@ def test_otp_refusal_text_is_authored_not_generated(client):
     """An OTP refusal must read the same every time, so it is served verbatim."""
     r = client.post("/v1/genie/chat", json={
         "message": "top up my wallet",
-        "ui_context": {"screen": "wallet_management", "role": "AD_PARTNER_ADMIN"},
+        "uiContext": {"screen": "wallet_management", "role": "AD_PARTNER_ADMIN"},
     })
     evs = events(r)
     caps = [d for n, d in evs if n == "block" and d["type"] == "capability"]
-    assert caps[0]["meta"]["otp_gated"] is True
+    assert caps[0]["meta"]["otpGated"] is True
     refusals = [d for n, d in evs if n == "block" and d["type"] == "refusal"]
     assert len(refusals) == 1
     assert refusals[0]["meta"]["verbatim"] is True
@@ -138,22 +138,22 @@ def test_definition_is_served_verbatim(client):
     """Definitions come from the YAML, never paraphrased, never vector-retrieved."""
     r = client.post("/v1/genie/chat", json={
         "message": "what does verified impressions mean",
-        "ui_context": {"screen": "command_centre", "role": "AD_PARTNER_ADMIN"},
+        "uiContext": {"screen": "command_centre", "role": "AD_PARTNER_ADMIN"},
     })
     evs = events(r)
     defs = [d for n, d in evs if n == "block" and d["type"] == "definition"]
     assert defs and defs[0]["meta"]["verbatim"] is True
     # Blocked metric: the definition is known, the FIGURE is not served.
     gaps = [d for n, d in evs if n == "block" and d["type"] == "unavailable"]
-    assert gaps and "R7" in gaps[0]["meta"]["blocked_by"]
+    assert gaps and "R7" in gaps[0]["meta"]["blockedBy"]
 
 
 def test_session_is_continuous(client):
     first = client.post("/v1/genie/chat", json={"message": "hello"})
-    sid = events(first)[0][1]["session_id"]
+    sid = events(first)[0][1]["sessionId"]
     second = client.post("/v1/genie/chat", json={"message": "again",
-                                                 "session_id": sid})
-    assert events(second)[0][1]["session_id"] == sid
+                                                 "sessionId": sid})
+    assert events(second)[0][1]["sessionId"] == sid
 
 
 def test_unmatched_query_says_so_rather_than_guessing(client):
@@ -175,6 +175,6 @@ def test_stub_says_it_is_a_stub(client):
     """An assistant that quietly degrades is worse than one that says so."""
     r = client.post("/v1/genie/chat", json={
         "message": "what does verified impressions mean",
-        "ui_context": {"screen": "command_centre", "role": "AD_PARTNER_ADMIN"}})
+        "uiContext": {"screen": "command_centre", "role": "AD_PARTNER_ADMIN"}})
     finals = [d for n, d in events(r) if n == "block" and d["type"] == "text"]
     assert finals and finals[0]["meta"]["stub"] is True

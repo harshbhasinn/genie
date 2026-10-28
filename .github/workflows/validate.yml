@@ -93,5 +93,6 @@ jobs:
         # tokens spent. CI must not depend on a third party's uptime.
         working-directory: service
         env:
+          GENIE_ENV: local
           GENIE_TEST_REDIS_URL: redis://127.0.0.1:6379/0
         run: python -m pytest tests -q -rs

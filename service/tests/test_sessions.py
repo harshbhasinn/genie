@@ -73,8 +73,8 @@ def turn(c, token, message, session_id=None):
     """(session id, how the turn was routed, the answer)."""
     headers = {"Authorization": f"Bearer {token}"} if token else {}
     r = c.post("/v1/genie/chat", headers=headers, json={
-        "message": message, "session_id": session_id,
-        "ui_context": {"screen": "command_centre", "role": "AD_PARTNER_ADMIN"}})
+        "message": message, "sessionId": session_id,
+        "uiContext": {"screen": "command_centre", "role": "AD_PARTNER_ADMIN"}})
     assert r.status_code == 200
     events, name = [], None
     for line in r.text.splitlines():
@@ -85,7 +85,7 @@ def turn(c, token, message, session_id=None):
     assert events[-1][0] == "done"
     blocks = [d for n, d in events if n == "block"]
     routed = next((b["meta"].get("match") for b in blocks if b["type"] == "capability"), None)
-    return events[0][1]["session_id"], routed, blocks[-1]["content"] if blocks else ""
+    return events[0][1]["sessionId"], routed, blocks[-1]["content"] if blocks else ""
 
 
 # ── across users ─────────────────────────────────────────────────────────

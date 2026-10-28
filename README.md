@@ -118,6 +118,13 @@ Sessions live in this process's memory unless `GENIE_REDIS_URL` is set; then eve
 shares them through Redis (`docker compose up -d redis` for a local one). Either way a session is
 stored under the user the BFF verified, so one user's conversation can never load for another.
 
+**The campaign calculator** is `POST /v1/genie/plan`: a window, a budget, slots and an optional
+target reach in; the cheapest plan that reaches the target (or the most reach for the budget),
+screens per date per line, streamed back, then up to two alternatives on request. It is an exact
+solver (HiGHS through scipy), run in its own processes so chat never waits, and it never stores a
+plan. Locally, `GENIE_PLAN_SOURCE=fixture` serves demo data; the real free-screen and rate
+endpoints are specified for the backend team in `design/calculator/availability-api-spec.md`.
+
 ```bash
 curl -N -X POST http://127.0.0.1:9030/v1/genie/chat   -H 'Content-Type: application/json'   -d '{"message":"what is my wallet balance",
        "ui_context":{"screen":"command_centre","role":"AD_PARTNER_ADMIN"}}'

@@ -141,6 +141,10 @@ class Block:
     meta: dict | None = None
 
 
+# What the user sees when the model fails. The provider's own message (which names the
+# provider, a model id or a setting) goes to the log only.
+MODEL_FAILED = "Genie couldn't write this answer just now. Try again in a moment."
+
 # The product's own words, for both voices (ADGRID_KNOWLEDGE_BASE.md §2).
 NAMES = ("Call the user's organisation \"you\" - it is a Media Partner or an Advertising Partner; "
          "never an agency, an Ad Partner or AP. Name roles only as: "
@@ -709,7 +713,7 @@ class Responder:
                 yield Block("token", chunk)
         except LLMError as err:
             log.warning("llm failed: %s", err)
-            yield Block("error", str(err), {"retryable": err.retryable})
+            yield Block("error", MODEL_FAILED, {"retryable": err.retryable})
             return
         answer = "".join(collected)
         session.add("model", answer)
@@ -777,7 +781,8 @@ class Responder:
                 collected.append(chunk)
                 yield Block("token", chunk)
         except LLMError as err:
-            yield Block("error", str(err), {"retryable": err.retryable})
+            log.warning("llm failed: %s", err)
+            yield Block("error", MODEL_FAILED, {"retryable": err.retryable})
             return
         yield Block("text", "".join(collected), {"final": True, "unrouted": True})
 
