@@ -23,11 +23,11 @@ from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from ..auth.identity import whoami
-from ..auth.tokens import bearer, decode
+from ..auth.identity import Identity, whoami_cached
+from ..auth.tokens import bearer
 from ..bff import BffError
 from .responder import Responder
-from .session import Session, SessionStore, UIContext
+from .session import LOCAL_OWNER, Session, SessionStore, UIContext
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/v1/genie", tags=["chat"])
@@ -43,27 +43,40 @@ async def _token_for(request: Request) -> str | None:
     return await fresh() if fresh else source.token()
 
 
-async def _establish_identity(request: Request, session: Session, token: str | None) -> None:
-    """Replace the browser's HINTS (role, client) with what the BFF says about this token.
-
-    Read once per session per user; a different user's token re-reads it. On any
-    failure the session simply has no identity, and live answers say so.
-    """
+async def _identity(request: Request, store: SessionStore, token: str | None) -> Identity | None:
+    """Who the BFF says this token belongs to - read through the `me` cache. None when
+    there is no BFF, no token, or the BFF would not say."""
     bff = getattr(request.app.state, "bff", None)
     if bff is None or not token:
+        return None
+    try:
+        identity = await whoami_cached(store.kv, bff, token, store.prefix)
+    except BffError as err:
+        log.info("whoami failed: %s", err.kind)
+        return None
+    return identity if identity.user_id else None
+
+
+def _owner(request: Request, identity: Identity | None) -> str | None:
+    """Whose sessions this request may load: the verified user, never a claim. Only a
+    LOCAL run with no BFF has no users to tell apart (one shared owner); anywhere else,
+    nobody verified means nobody's sessions - a fresh, unsaved one. So a deployed Genie
+    without a BFF (admin mode, a misconfiguration) can never pool its callers' sessions."""
+    if identity is not None:
+        return f"user:{identity.user_id}"
+    settings = getattr(request.app.state, "settings", None)
+    local = settings is not None and settings.genie_env == "local"
+    if local and getattr(request.app.state, "bff", None) is None:
+        return LOCAL_OWNER
+    return None
+
+
+def _apply_identity(request: Request, session: Session, identity: Identity | None) -> None:
+    """Replace the browser's HINTS (role, client) with what the BFF says about this token.
+    Without an identity the session has none, and live answers say so."""
+    session.identity = identity
+    if identity is None:
         return
-    info = decode(token)
-    subject = info.subject if info else None
-    if session.identity is not None and session.identity_subject == subject:
-        identity = session.identity
-    else:
-        try:
-            identity = await whoami(bff, token)
-        except BffError as err:
-            log.info("whoami failed: %s", err.kind)
-            session.identity, session.identity_subject = None, None
-            return
-        session.identity, session.identity_subject = identity, subject
     grant = identity.grant_for(session.context.client_id)
     if grant is None:
         # The hinted client is not one this user holds. Ignore the hint; use their own.
@@ -104,11 +117,12 @@ async def chat(req: ChatRequest, request: Request) -> StreamingResponse:
     responder: Responder = request.app.state.responder
     store: SessionStore = request.app.state.sessions
 
-    session = store.get_or_create(req.session_id)
+    token = await _token_for(request)
+    identity = await _identity(request, store, token)
+    session = await store.load(_owner(request, identity), req.session_id)
     if req.ui_context:
         session.context = UIContext.parse(req.ui_context.model_dump())
-    token = await _token_for(request)
-    await _establish_identity(request, session, token)
+    _apply_identity(request, session, identity)
 
     turn_id = uuid.uuid4().hex[:12]
     started = time.perf_counter()
@@ -132,6 +146,9 @@ async def chat(req: ChatRequest, request: Request) -> StreamingResponse:
             yield _sse("error", {"code": type(err).__name__,
                                  "message": str(err)[:300], "retryable": False})
         finally:
+            # Saved however the turn ended, so a follow-up asked before an error or a
+            # dropped connection is still answerable next turn.
+            await store.save(session)
             elapsed = int((time.perf_counter() - started) * 1000)
             log.info("turn=%s blocks=%d ms=%d screen=%s",
                      turn_id, count, elapsed, session.context.screen)

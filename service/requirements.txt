@@ -6,6 +6,8 @@ pydantic>=2.9
 pydantic-settings>=2.6
 httpx>=0.27
 pyyaml>=6.0
+# sessions and short-lived caches, when GENIE_REDIS_URL is set
+redis>=5.0
 
 # dev
 pytest>=8.3

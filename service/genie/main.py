@@ -21,10 +21,11 @@ from .auth import tokens as token_auth
 from .bff import BffClient
 from .chat.responder import Responder
 from .chat.router import router as chat_router
-from .chat.session import MemorySessionStore
+from .chat.session import SessionStore
 from .config import settings
 from .llm import build as build_provider
 from .ontology import OntologyError, load
+from .store import build as build_store
 
 log = logging.getLogger("genie")
 STARTED = time.time()
@@ -70,7 +71,10 @@ async def lifespan(app: FastAPI):
     app.state.provider = provider
     app.state.tokens = token_auth.build(cfg)
     app.state.bff = bff
-    app.state.sessions = MemorySessionStore()
+    # Sessions (and the `me` cache) in Redis when GENIE_REDIS_URL is set, so every Genie
+    # task shares them; in this process's memory otherwise.
+    app.state.sessions = SessionStore(build_store(cfg.genie_redis_url.get_secret_value()),
+                                      ttl_s=cfg.genie_session_ttl_s)
     app.state.responder = Responder(ontology, provider, bff=bff,
                                     live_wording=cfg.genie_live_wording)
 
@@ -84,6 +88,7 @@ async def lifespan(app: FastAPI):
             await provider.close()
         if bff is not None:
             await bff.close()
+        await app.state.sessions.kv.close()
         log.info("stopped")
 
 
@@ -139,7 +144,7 @@ async def healthz() -> dict:
         "config": cfg.redacted(),
         "ontology": ontology.stats,
         "responder": app.state.responder.mode,
-        "sessions": app.state.sessions.count(),
+        "sessions": await app.state.sessions.kv.health(),
         "token": token_state,
     }
 

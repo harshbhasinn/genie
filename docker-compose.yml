@@ -33,5 +33,27 @@ services:
       timeout: 3s
       retries: 10
 
+  # Sessions and short-lived caches (GENIE_REDIS_URL). Port 6381, because 6379/6380 are
+  # often taken by other local Redis containers. Nothing here needs to survive a
+  # restart - every key has a TTL - so persistence is off. volatile-lru evicts only
+  # keys that have a TTL, which is every key Genie writes.
+  #   docker compose up -d redis
+  #   GENIE_REDIS_URL=redis://:genie_local_dev@127.0.0.1:6381/0   (127.0.0.1, not localhost:
+  #   on Windows localhost tries IPv6 first, and the port is bound to IPv4 only)
+  redis:
+    image: redis:7-alpine
+    container_name: genie-redis
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6381:6379"
+    command: >
+      redis-server --requirepass genie_local_dev --save "" --appendonly no
+      --maxmemory 128mb --maxmemory-policy volatile-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "genie_local_dev", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
 volumes:
   genie_pgdata:

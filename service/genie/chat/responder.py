@@ -171,7 +171,7 @@ def _ask(session: Session, text: str, cap_id: str, block: dict) -> Block:
     """Ask a follow-up, remembering its options so the next message can answer it - and
     the question it was about, so "Last month" still answers "which brand spends most"."""
     session.pending = {"capability": cap_id, "text": text,
-                       "options": [(o["value"], o["label"]) for o in block["options"]]}
+                       "options": [[o["value"], o["label"]] for o in block["options"]]}
     session.add("user", text)
     session.add("model", block["question"])
     return Block("follow_up", block["question"], block)
