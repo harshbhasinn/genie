@@ -1,11 +1,13 @@
-"""POST /v1/genie/plan - the calculator endpoint.
+"""POST /v1/genie/plan - the calculator endpoint, on Adgrid's booking model.
 
 The headline test: twelve users plan AT THE SAME TIME through ONE shared solver process,
-each with different data (the backend shows half of them fewer contracts) and a different
+each with different data (the backend shows half of them only one city) and a different
 budget. Every one must get exactly the plan they get when planning alone. Then: the
 partner always comes from the verified user, a forged token gets the real user's view,
 caches are per user and hold no plan and no token, a result that does not prove it
-answers its request is refused, and every failure has a clear code.
+answers its request is refused, every plan is priced by simulate-cost and never shown
+over budget, the real BFF reads are sent as the guide describes, and every failure has
+a clear code.
 """
 from __future__ import annotations
 
@@ -15,6 +17,7 @@ import multiprocessing
 import time
 from concurrent.futures import Executor, Future, ProcessPoolExecutor, ThreadPoolExecutor
 from datetime import datetime, timedelta
+from decimal import Decimal
 
 import httpx
 import pytest
@@ -27,14 +30,15 @@ from genie.config import Settings
 from genie.main import app
 from genie.planner import model
 from genie.planner.cache import PACKED, PlanningInputs, pack, unpack
-from genie.planner.contract import (AvailabilityQuery, ContractError, parse_availability,
-                                    parse_rates_and_reach)
+from genie.planner.contract import (ContractError, PlanQuery, parse_availability, parse_quote,
+                                    parse_rate_cards, parse_reach)
 from genie.planner.engine import Planner, PlannerRefused, PlanUnavailable, _warm
 from genie.planner.router import IST
-from genie.planner.source import FixtureSource
+from genie.planner.source import BffPlanningSource, FixtureReach, FixtureSource
 from .test_wallet import QA, envelope, jwt
 
 CLIENT = "c-infinity"
+BRAND = "brand-fizz"
 EXP = int(time.time()) + 600
 USERS = {jwt(sub=f"u-{i}", azp="adg-dashboard", exp=EXP): f"u-{i}" for i in range(12)}
 TOKENS = list(USERS)
@@ -48,41 +52,57 @@ def window(days=15):
 
 
 def body(**over):
-    b = {"window": window(), "budget": "35000", "target": 9000, "imageSlots": 3, "videoSlots": 2}
+    b = {"window": window(), "dayparts": ["MORNING", "EVENING"], "imageSlots": 3, "videoSlots": 2,
+         "advertisedBrandId": BRAND, "budget": "35000", "target": 15000}
     b.update(over)
     return {k: v for k, v in b.items() if v is not None}
 
 
 class ScopedSource(FixtureSource):
-    """The worked example's data, scoped per user the way a backend may scope it: odd
-    users see only K-GGN-1. Records every call: (endpoint, token, client)."""
+    """The demo data, scoped per user the way a backend may scope it: odd users see only
+    Gurugram. Records every call: (read, token, client). `surcharge` lifts every quote."""
 
-    def __init__(self, *, delay: float = 0.0, fail: dict | None = None, mutate=None):
+    def __init__(self, *, delay: float = 0.0, fail: dict | None = None, mutate=None,
+                 surcharge: Decimal = Decimal(1)):
         super().__init__()
         self.calls: list[tuple[str, str | None, str]] = []
-        self.delay, self.fail, self.mutate = delay, fail or {}, mutate
+        self.delay, self.fail, self.mutate, self.surcharge = delay, fail or {}, mutate, surcharge
 
-    def _visible(self, token):
-        user = USERS.get(token, "u-0")
-        return None if int(user.split("-")[1]) % 2 == 0 else {"K-GGN-1"}
+    def _record(self, kind, token, client_id):
+        self.calls.append((kind, token, client_id))
+        if kind in self.fail:
+            raise self.fail[kind]
 
     async def availability(self, token, client_id, q):
-        self.calls.append(("A", token, client_id))
-        if "A" in self.fail:
-            raise self.fail["A"]
+        self._record("free", token, client_id)
         await asyncio.sleep(self.delay)
         data = await super().availability(token, client_id, q)
-        allowed = self._visible(token)
-        if allowed is not None:
-            data["rows"] = [r for r in data["rows"] if r["contractCode"] in allowed]
-        return self.mutate("A", data) if self.mutate else data
+        user = USERS.get(token, "u-0")
+        if int(user.split("-")[1]) % 2:
+            data["cities"] = [c for c in data["cities"] if c["city"] == "GGN"]
+        return self.mutate("free", data) if self.mutate else data
 
-    async def rates_and_reach(self, token, client_id):
-        self.calls.append(("B", token, client_id))
-        if "B" in self.fail:
-            raise self.fail["B"]
-        data = await super().rates_and_reach(token, client_id)
-        return self.mutate("B", data) if self.mutate else data
+    async def rate_cards(self, token, client_id):
+        self._record("rates", token, client_id)
+        data = await super().rate_cards(token, client_id)
+        return self.mutate("rates", data) if self.mutate else data
+
+    async def quote(self, token, client_id, brand_id, q, selections):
+        self._record("quote", token, client_id)
+        data = await super().quote(token, client_id, brand_id, q, selections)
+        total = (Decimal(data["totalCost"]) * self.surcharge).quantize(Decimal("0.01"))
+        return {"totalCost": str(total), "adgridToAdPartnerTotalCost": "1.00"}
+
+
+class Reach(FixtureReach):
+    def __init__(self, fail=None):
+        super().__init__()
+        self.fail = fail
+
+    async def reach(self, token, client_id):
+        if self.fail:
+            raise self.fail
+        return await super().reach(token, client_id)
 
 
 def me(request: httpx.Request) -> httpx.Response:
@@ -95,14 +115,15 @@ def me(request: httpx.Request) -> httpx.Response:
                     "permissions": []}]}))
 
 
-def install(source, planner: Planner | None = None, *, env: str = "local", bff: bool = True):
+def install(source, planner: Planner | None = None, *, env: str = "local", bff: bool = True,
+            reach=None):
     app.state.settings = Settings(_env_file=None, genie_env=env)
     app.state.tokens = NoToken()
     app.state.bff = BffClient(QA, transport=httpx.MockTransport(me)) if bff else None
     app.state.sessions = MemorySessionStore()
     app.state.planner = planner or Planner(2, max_in_flight=20, per_user_per_min=100,
                                            executor=ThreadPoolExecutor(2))
-    app.state.plan_inputs = (PlanningInputs(app.state.sessions.kv, source)
+    app.state.plan_inputs = (PlanningInputs(app.state.sessions.kv, source, reach or Reach())
                              if source is not None else None)
     return app.state
 
@@ -139,41 +160,67 @@ def plans_of(r: httpx.Response) -> list[dict]:
     return [d for e, d in events(r.text) if e == "plan"]
 
 
-# ── the worked example, end to end ────────────────────────────────────────────
+# ── end to end, on the demo data ──────────────────────────────────────────────
 
-def test_plan_one_then_the_alternatives_asked_for():
+def test_a_plan_is_a_campaign_the_wizard_can_book():
     install(ScopedSource())
-    r = one(TOKENS[0], body(alternatives=2))
+    r = one(TOKENS[0], body())
     assert r.status_code == 200
-    names = [e for e, _ in events(r.text)]
-    assert names == ["start", "result", "plan", "plan", "notice", "done"]
+    assert [e for e, _ in events(r.text)] == ["start", "result", "plan", "done"]
     result = dict(events(r.text))["result"]
     assert result["status"] == "TARGET_MET" and result["notices"] == []
-    assert result["versions"] == {"ratesVersion": "demo-rates-1", "reachVersion": "demo-reach-1"}
-    p1, p2 = plans_of(r)
-    assert (p1["cost"], p1["budgetLeft"], p1["reach"], p1["screenDays"]) == ("17920.00", "17080.00", 9000, 91)
-    assert p1["label"] == "Cheapest plan that reaches 9,000"
-    assert p1["contracts"] == ["K-DEL-1", "K-NOI-1"] and p1["daysPlayed"] == 15
-    evening = next(ln for ln in p1["lines"] if ln["daypart"] == "EVENING")
-    d1, d10 = TOMORROW, TOMORROW + timedelta(days=9)
-    span = (f"{d1:%b} {d1.day}–{d10.day}" if d1.month == d10.month
-            else f"{d1:%b} {d1.day}–{d10:%b} {d10.day}")
-    assert evening["schedule"] == f"4 a day {span}"
-    assert (evening["cost"], evening["reach"]) == ("8800.00", 4800)
-    assert p2["label"] == "Without K-NOI-1" and p2["vsPlan1"] == {"cost": "+100.00", "reach": 0}
-    notice = [d for e, d in events(r.text) if e == "notice"][0]
-    assert notice["code"] == "NO_MORE_ALTERNATIVES" and "10%" in notice["text"]
+    assert result["dayparts"] == ["MORNING", "EVENING"] and result["reachVersion"] == "demo-reach-1"
+    p1 = plans_of(r)[0]
+    # 5 Delhi grocery screens: (3x900 + 2x1,600 + 3x1,000 + 2x1,800) / 30 x 15 = Rs 6,250 each,
+    # reach (90 + 120) x 15 = 3,150 each - the cheapest way to 15,000 (checked by brute force
+    # in test_planner_engine.py)
+    assert (p1["cost"], p1["budgetLeft"], p1["reach"], p1["screens"]) == ("31250.00", "3750.00", 15750, 5)
+    assert p1["label"] == "Cheapest plan that reaches 15,000" and p1["cities"] == ["Delhi"]
+    assert p1["lines"] == [{"city": "DEL", "cityName": "Delhi", "shopType": "GROCERY",
+                            "shopTypeName": "Grocery", "screens": 5, "reach": 15750,
+                            "listCost": "31250.00"}]
+    assert p1["campaign"] == {
+        "startDate": TOMORROW.isoformat(), "endDate": (TOMORROW + timedelta(days=14)).isoformat(),
+        "timeSlots": ["MORNING", "EVENING"], "imageSlotsRequested": 3, "videoSlotsRequested": 2,
+        "deviceTier": "NON_PREMIUM", "advertisedBrandId": BRAND,
+        "selections": [{"city": "DEL", "shopType": "GROCERY", "deviceCount": 5}]}
     assert app.state.planner.in_flight == 0                     # released when the stream ended
 
 
-def test_dates_without_free_screens_are_named():
+def test_alternatives_leave_out_a_city_and_say_how_they_compare():
     install(ScopedSource())
-    r = one(TOKENS[0], body(target=None, cities=["DEL"], dayparts=["EVENING"]))
+    r = one(TOKENS[0], body(target=None, alternatives=2))
+    p1, p2, p3 = plans_of(r)
+    assert p1["label"] == "Most reach for ₹35,000" and set(p1["cities"]) == {"Delhi", "Mumbai", "Noida"}
+    assert (p1["cost"], p1["reach"]) == ("34175.00", 16500)
+    assert p2["label"] == "Without Noida" and p2["vsPlan1"] == {"cost": "-350.00", "reach": -75}
+    assert p3["label"] == "Without Mumbai" and p3["vsPlan1"] == {"cost": "+700.00", "reach": -300}
+    for p in (p2, p3):
+        assert float(p["cost"]) <= 35000 and p["reach"] >= 0.9 * p1["reach"]
+
+
+def test_the_quote_is_the_price_and_a_plan_over_budget_is_never_shown():
+    """Surcharge days lift every quote 10%: plan 1 is solved again under a tighter cap until
+    its QUOTE fits, and that quote is the price shown."""
+    source = ScopedSource(surcharge=Decimal("1.10"))
+    install(source)
+    r = one(TOKENS[0], body(target=None))
+    p1 = plans_of(r)[0]
+    assert float(p1["cost"]) <= 35000
+    assert p1["note"].startswith("The price includes ₹")
+    assert sum(1 for kind, *_ in source.calls if kind == "quote") >= 2      # priced, re-solved, priced
+    source = ScopedSource(surcharge=Decimal("5"))
+    install(source)
+    r = one(TOKENS[0], body(target=None, budget="7000"))
     result = dict(events(r.text))["result"]
-    assert result["status"] == "BUDGET_PLAN"
-    codes = {n["code"]: n["text"] for n in result["notices"]}
-    assert "NO_SCREENS_ON_DATES" in codes and codes["NO_SCREENS_ON_DATES"].startswith("No free screens on")
-    assert plans_of(r)[0]["daysPlayed"] == 10
+    assert result["status"] == "QUOTE_OVER_BUDGET" and plans_of(r) == []
+    assert "QUOTE_OVER_BUDGET" in {n["code"] for n in result["notices"]}
+
+
+def test_the_partner_side_of_the_price_never_reaches_the_user():
+    install(ScopedSource())
+    r = one(TOKENS[0], body())
+    assert "adgrid" not in r.text.lower() and "1.00" not in r.text
 
 
 # ── no mix-up: twelve users, one solver process, all at once ─────────────────
@@ -189,7 +236,7 @@ def one_solver_process():
 
 
 def test_twelve_users_at_once_through_one_solver_process_each_get_their_own_plan(one_solver_process):
-    requests = [(t, body(target=None, budget=str(4000 + 2500 * i))) for i, t in enumerate(TOKENS)]
+    requests = [(t, body(target=None, budget=str(8000 + 2500 * i))) for i, t in enumerate(TOKENS)]
 
     install(ScopedSource())                                     # each user alone, one by one
     alone = [plans_of(one(t, p)) for t, p in requests]
@@ -203,11 +250,10 @@ def test_twelve_users_at_once_through_one_solver_process_each_get_their_own_plan
         assert r.status_code == 200, r.text
         assert plans_of(r) == mine, f"user {i} got a different plan when others planned too"
         plan = plans_of(r)[0]
-        assert float(plan["cost"]) <= 4000 + 2500 * i           # within THEIR budget
+        assert float(plan["cost"]) <= 8000 + 2500 * i           # within THEIR budget
         if i % 2:
-            assert plan["contracts"] == ["K-GGN-1"]             # only what THEY may see
-    # every read went out with the user's own token, for the partner `me` named
-    assert sorted(t for kind, t, _ in source.calls if kind == "A") == sorted(TOKENS)
+            assert plan["cities"] == ["Gurugram"]               # only what THEY may see
+    assert sorted(t for kind, t, _ in source.calls if kind == "free") == sorted(TOKENS)
     assert {c for _, _, c in source.calls} == {CLIENT}
 
 
@@ -223,26 +269,28 @@ def test_the_partner_comes_from_the_verified_user_never_the_request():
 def test_a_forged_token_gets_the_real_users_view():
     install(ScopedSource())
     plan = plans_of(one(FORGED, body(target=None)))[0]          # claims u-0; the BFF says u-1
-    assert plan["contracts"] == ["K-GGN-1"]                     # u-1's view, not u-0's
+    assert plan["cities"] == ["Gurugram"]                       # u-1's view, not u-0's
     keys = list(app.state.sessions.kv._items)
     assert any(":user:u-1:" in k for k in keys) and not any(":user:u-0:" in k for k in keys)
 
 
-def test_caches_are_per_user_and_hold_no_plan_and_no_token():
+def test_caches_are_per_user_compressed_and_hold_no_plan_and_no_token():
     source = ScopedSource()
     state = install(source)
     one(TOKENS[0], body())
-    one(TOKENS[0], body(budget="30000"))                        # same window: read from cache
+    one(TOKENS[0], body(budget="30000"))                        # same question: inputs cached
     one(TOKENS[2], body())                                      # same partner, another user
-    a_reads = [t for kind, t, _ in source.calls if kind == "A"]
-    assert a_reads == [TOKENS[0], TOKENS[2]]                    # B never reused A's entry
+    assert [t for kind, t, _ in source.calls if kind == "free"] == [TOKENS[0], TOKENS[2]]
+    assert [t for kind, t, _ in source.calls if kind == "quote"].count(TOKENS[0]) == 2  # never cached
     kv = state.sessions.kv._items
     plan_keys = [k for k in kv if ":plan:" in k]
-    assert plan_keys and all(":plan:free:user:" in k or ":plan:rr:user:" in k for k in plan_keys)
+    assert plan_keys and all(k.split(":plan:")[1].split(":")[1] == "user" for k in plan_keys)
     for key, (_, value) in kv.items():
+        if ":plan:" in key:
+            assert value.startswith(PACKED)
         text = json.dumps(unpack(value)) if value.startswith(PACKED) else value
         assert not any(t in text or t in key for t in TOKENS), "a token was stored"
-        assert '"lines"' not in text and "budgetLeft" not in text, "a plan was stored"
+        assert "selections" not in text and "budgetLeft" not in text, "a plan was stored"
 
 
 def test_a_tampered_cache_value_is_refused_and_read_fresh():
@@ -253,10 +301,10 @@ def test_a_tampered_cache_value_is_refused_and_read_fresh():
     key = next(k for k in kv if ":plan:free:" in k)
     expires, value = kv[key]
     bad = unpack(value)
-    bad["rows"][0]["freeDevices"] = [99]                        # the wrong length
+    bad["cities"][0]["shopTypes"][0]["count"] = -4
     kv[key] = (expires, pack(bad))
     assert one(TOKENS[0], body()).status_code == 200
-    assert [k for k, *_ in source.calls].count("A") == 2        # read again, not planned from
+    assert [k for k, *_ in source.calls].count("free") == 2     # read again, not planned from
 
 
 class Tampering(Executor):
@@ -279,7 +327,6 @@ def test_a_result_that_does_not_prove_it_is_this_requests_is_refused(field):
                                     executor=Tampering(field)))
     r = one(TOKENS[0], body())
     assert r.status_code == 500 and r.json()["code"] == "PLAN_REFUSED"
-    assert "plan" not in r.text.split("code")[0]
     assert app.state.planner.in_flight == 0
 
 
@@ -340,11 +387,13 @@ def test_limits_reach_the_caller_with_retry_after():
 # ── failures, each with a code ────────────────────────────────────────────────
 
 @pytest.mark.parametrize("fail, status, code", [
-    ({"B": BffError("forbidden", "no")}, 403, "NO_RATE_ACCESS"),
-    ({"A": BffError("forbidden", "no")}, 403, "NO_ACCESS"),
-    ({"A": BffError("signed_out", "no")}, 401, "SIGNED_OUT"),
-    ({"A": BffError("unavailable", "down")}, 503, "BACKEND_UNAVAILABLE"),
-    ({"A": BffError("rejected", "bad")}, 400, "BACKEND_REFUSED"),
+    ({"rates": BffError("forbidden", "no")}, 403, "NO_RATE_ACCESS"),
+    ({"free": BffError("forbidden", "no")}, 403, "NO_ACCESS"),
+    ({"quote": BffError("forbidden", "no")}, 403, "NO_ACCESS"),
+    ({"free": BffError("signed_out", "no")}, 401, "SIGNED_OUT"),
+    ({"free": BffError("unavailable", "down")}, 503, "BACKEND_UNAVAILABLE"),
+    ({"quote": BffError("unavailable", "down")}, 503, "BACKEND_UNAVAILABLE"),
+    ({"rates": BffError("rejected", "bad")}, 400, "BACKEND_REFUSED"),
 ])
 def test_backend_failures(fail, status, code):
     install(ScopedSource(fail=fail))
@@ -353,26 +402,51 @@ def test_backend_failures(fail, status, code):
     assert app.state.planner.in_flight == 0
 
 
+def test_no_reach_source_answer_is_a_clear_failure():
+    install(ScopedSource(), reach=Reach(fail=BffError("unavailable", "down")))
+    r = one(TOKENS[0], body())
+    assert (r.status_code, r.json()["code"]) == (503, "BACKEND_UNAVAILABLE")
+
+
 def test_data_that_breaks_the_contract_is_never_planned_from():
-    def short(kind, data):
-        if kind == "A":
-            data["rows"][0]["freeDevices"] = data["rows"][0]["freeDevices"][:-1]
+    def broken(kind, data):
+        if kind == "free":
+            data["cities"][0]["shopTypes"][0]["count"] = "lots"
         return data
-    install(ScopedSource(mutate=short))
+    install(ScopedSource(mutate=broken))
     r = one(TOKENS[0], body())
     assert (r.status_code, r.json()["code"]) == (502, "BAD_BACKEND_DATA")
 
 
-def test_lines_without_a_rate_are_skipped_and_the_user_is_told():
-    def no_noida_rate(kind, data):
-        if kind == "B":
-            data["rates"] = [r for r in data["rates"] if r["contractCode"] != "K-NOI-1"]
+def test_cells_without_a_price_are_left_out_and_the_user_is_told():
+    def no_delhi_grocery(kind, data):
+        if kind == "rates":
+            data["rateCards"] = [r for r in data["rateCards"]
+                                 if not (r["city"] == "DEL" and r["shopType"] == "GROCERY")]
         return data
-    install(ScopedSource(mutate=no_noida_rate))
+    install(ScopedSource(mutate=no_delhi_grocery))
     r = one(TOKENS[0], body())
     result = dict(events(r.text))["result"]
     assert {n["code"] for n in result["notices"]} == {"LINES_SKIPPED_NO_RATE"}
-    assert "K-NOI-1" not in plans_of(r)[0]["contracts"]
+    assert all(ln["city"] != "DEL" or ln["shopType"] != "GROCERY" for ln in plans_of(r)[0]["lines"])
+
+
+def test_a_start_date_with_every_daypart_over_is_refused_with_the_earliest_start():
+    def closed(kind, data):
+        if kind == "free":
+            data.update(startDateFullyClosed=True, earliestStartDate="2026-12-02")
+        return data
+    install(ScopedSource(mutate=closed))
+    r = one(TOKENS[0], body())
+    assert (r.status_code, r.json()["code"]) == (422, "START_DATE_CLOSED")
+    assert "2026-12-02" in r.json()["message"]
+
+
+def test_no_free_screens_is_a_clear_answer():
+    install(ScopedSource())
+    r = one(TOKENS[0], body(cities=["BLR"]))
+    result = dict(events(r.text))["result"]
+    assert result["status"] == "NO_INVENTORY" and plans_of(r) == []
 
 
 def test_the_calculator_says_when_it_is_not_connected():
@@ -398,97 +472,155 @@ def test_bad_input_is_refused_with_a_code(over, code):
 
 
 @pytest.mark.parametrize("over", [{"budget": "0"}, {"budget": "10.001"}, {"target": 0},
-                                  {"alternatives": 3}, {"surprise": 1}, {"dayparts": ["NOON"]}])
+                                  {"alternatives": 3}, {"surprise": 1}, {"dayparts": ["NOON"]},
+                                  {"dayparts": []}, {"advertisedBrandId": ""}])
 def test_malformed_requests_are_refused(over):
     install(ScopedSource())
     assert one(TOKENS[0], body(**over)).status_code == 422
 
 
+def test_the_brand_is_required():
+    install(ScopedSource())
+    b = body()
+    del b["advertisedBrandId"]
+    assert one(TOKENS[0], b).status_code == 422
+
+
 def test_demo_data_can_never_run_outside_local():
-    with pytest.raises(ValidationError):
-        Settings(_env_file=None, genie_env="qa", genie_plan_source="fixture")
-    assert Settings(_env_file=None, genie_env="local", genie_plan_source="fixture")
+    for field in ("genie_plan_source", "genie_plan_reach"):
+        with pytest.raises(ValidationError):
+            Settings(_env_file=None, genie_env="qa", **{field: "fixture"})
+    assert Settings(_env_file=None, genie_env="qa", genie_plan_source="bff")
+    assert Settings(_env_file=None, genie_env="local", genie_plan_source="fixture",
+                    genie_plan_reach="fixture")
+
+
+# ── the real BFF reads, sent as the guide describes ──────────────────────────
+
+class RecordingBff:
+    """Answers the three planning reads like the BFF, and records what was sent."""
+
+    def __init__(self):
+        self.sent: list[httpx.Request] = []
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        self.sent.append(request)
+        path = request.url.path
+        if path == "/api/v1/campaigns/availability-search":
+            return httpx.Response(200, json=envelope({"totalCount": 4, "cities": [
+                {"city": "DEL", "totalDevices": 4, "shopTypes": [{"shopType": "GROCERY", "count": 4}]}],
+                "startDateUnavailableSlots": [], "startDateFullyClosed": False}))
+        if path == "/api/v1/client-rate-cards":
+            return httpx.Response(200, json=envelope({"rateCards": [
+                {"clientId": None, "city": "DEL", "shopType": "GROCERY", "timeSlot": "MORNING",
+                 "imageSlotRate": "900.00", "videoSlotRate": "1600.00", "rateCardType": "BROADCAST"}]}))
+        if path == "/api/v1/campaigns/simulate-cost":
+            return httpx.Response(200, json=envelope({"totalCost": "2950.00",
+                                                      "adgridToAdPartnerTotalCost": "999.00"}))
+        return httpx.Response(404, json=envelope(None, success=False))
+
+
+def test_the_bff_source_reads_as_the_user_and_saves_nothing():
+    fake = RecordingBff()
+    source = BffPlanningSource(BffClient(QA, portal_id="AGENCY_PORTAL", transport=httpx.MockTransport(fake)))
+    q = PlanQuery(TOMORROW, TOMORROW + timedelta(days=14), ("MORNING",), 3, 2, cities=("DEL",))
+
+    async def go():
+        a = await source.availability("tok", CLIENT, q)
+        r = await source.rate_cards("tok", CLIENT)
+        s = await source.quote("tok", CLIENT, BRAND, q, [{"city": "DEL", "shopType": "GROCERY",
+                                                         "deviceCount": 1}])
+        return a, r, s
+    a, r, s = asyncio.run(go())
+    search, rates, quote = fake.sent
+    assert (search.method, rates.method, quote.method) == ("POST", "GET", "POST")
+    for req in fake.sent:
+        assert req.headers["authorization"] == "Bearer tok" and req.headers["x-portal-id"] == "AGENCY_PORTAL"
+    assert json.loads(search.content) == {
+        "clientId": CLIENT, "startDate": q.start.isoformat(), "endDate": q.end.isoformat(),
+        "timeSlots": ["MORNING"], "imageSlotsRequested": 3, "videoSlotsRequested": 2,
+        "deviceTier": "NON_PREMIUM", "page": 0, "size": 200, "cities": ["DEL"]}
+    assert dict(rates.url.params) == {"parentClientId": CLIENT, "rateCardType": "BROADCAST"}
+    sent = json.loads(quote.content)
+    assert "campaignId" not in sent and sent["advertisedBrandId"] == BRAND
+    assert sent["selections"] == [{"city": "DEL", "shopType": "GROCERY", "deviceCount": 1}]
+    assert parse_quote(s) == Decimal("2950.00")                 # the brand price only
+    assert parse_availability(a, q).counts == {("DEL", "GROCERY"): 4}
+    assert parse_rate_cards(r, CLIENT, BRAND).rates[("DEL", "GROCERY", "MORNING")].ipm_paise == 90000
 
 
 # ── the backend contract, field by field ──────────────────────────────────────
 
-Q = AvailabilityQuery(TOMORROW, TOMORROW + timedelta(days=2), 3, 2)
+Q = PlanQuery(TOMORROW, TOMORROW + timedelta(days=2), ("MORNING",), 3, 2)
 
 
-def good_a():
-    return {"clientId": CLIENT,
-            "window": {"from": Q.start.isoformat(), "to": Q.end.isoformat(), "days": 3},
-            "imageSlots": 3, "videoSlots": 2, "ratesVersion": "r1", "reachVersion": "v1",
-            "generatedAt": "2026-10-28T09:00:00Z",
-            "rows": [{"contractId": "k1", "contractCode": "K-1", "city": "DEL",
-                      "category": "GROCERY", "daypart": "MORNING", "freeDevices": [1, 0, 2]}]}
+def good_free():
+    return {"totalCount": 5, "cities": [{"city": "DEL", "totalDevices": 5, "shopTypes": [
+        {"shopType": "GROCERY", "count": 3}, {"shopType": "PHARMACY", "count": 2}]}],
+            "startDateUnavailableSlots": ["MORNING"], "startDateFullyClosed": False,
+            "earliestStartDate": None}
 
 
-def good_b():
-    return {"clientId": CLIENT, "currency": "INR", "ratesVersion": "r1", "reachVersion": "v1",
-            "rates": [{"contractId": "k1", "contractCode": "K-1", "city": "DEL", "category": "GROCERY",
-                       "daypart": "MORNING", "imageSlotRatePerMonth": "900.50",
-                       "videoSlotRatePerMonth": "1600"}],
-            "reach": [{"city": "DEL", "category": "GROCERY", "daypart": "MORNING",
-                       "dailyReachPerDevice": 90}]}
+def good_rates():
+    row = {"parentClientId": CLIENT, "city": "DEL", "shopType": "GROCERY", "timeSlot": "MORNING",
+           "imageSlotRate": "900.50", "videoSlotRate": "1600", "rateCardType": "BROADCAST"}
+    return {"rateCards": [{**row, "clientId": None},
+                          {**row, "clientId": BRAND, "imageSlotRate": "1000.00"},
+                          {**row, "clientId": "another-brand", "imageSlotRate": "1.00"},
+                          {**row, "clientId": None, "timeSlot": "EVENING", "rateCardType": "TARGETED"}]}
 
 
-def test_good_responses_parse():
-    a = parse_availability(good_a(), Q, CLIENT)
-    assert a.rows[0].free == (1, 0, 2) and a.days == 3
-    b = parse_rates_and_reach(good_b(), CLIENT)
-    assert b.rates[("k1", "DEL", "GROCERY", "MORNING")].ipm_paise == 90050
-    assert b.reach[("DEL", "GROCERY", "MORNING")] == 90
+def test_good_responses_parse_and_the_brands_own_price_wins():
+    a = parse_availability(good_free(), Q)
+    assert a.counts == {("DEL", "GROCERY"): 3, ("DEL", "PHARMACY"): 2}
+    assert a.start_date_unavailable == ("MORNING",)
+    card = parse_rate_cards(good_rates(), CLIENT, BRAND)
+    assert card.rates == {("DEL", "GROCERY", "MORNING"): card.rates[("DEL", "GROCERY", "MORNING")]}
+    assert card.rates[("DEL", "GROCERY", "MORNING")].ipm_paise == 100000 and card.brand_specific == 1
+    partner_only = parse_rate_cards(good_rates(), CLIENT, "brand-without-rows")
+    assert partner_only.rates[("DEL", "GROCERY", "MORNING")].ipm_paise == 90050
+    reach = parse_reach({"reachVersion": "v1", "reach": [
+        {"city": "DEL", "shopType": "GROCERY", "daypart": "MORNING", "dailyReachPerDevice": 90}]})
+    assert reach.daily == {("DEL", "GROCERY", "MORNING"): 90}
 
 
 @pytest.mark.parametrize("breakage", [
-    lambda d: d.update(clientId="someone-else"),
-    lambda d: d["window"].update(days=4),
-    lambda d: d["window"].update(to=(TOMORROW + timedelta(days=5)).isoformat()),
-    lambda d: d.update(imageSlots=6),
-    lambda d: d["rows"][0].update(freeDevices=[1, 0]),
-    lambda d: d["rows"][0].update(freeDevices=[1, -1, 2]),
-    lambda d: d["rows"][0].update(freeDevices=[1, True, 2]),
-    lambda d: d["rows"][0].update(freeDevices=[1, 1.5, 2]),
-    lambda d: d["rows"][0].update(daypart="NOON"),
-    lambda d: d["rows"][0].pop("contractId"),
-    lambda d: d["rows"].append(dict(d["rows"][0])),
-    lambda d: d.pop("ratesVersion"),
+    lambda d: d["cities"][0]["shopTypes"][0].update(count=-1),
+    lambda d: d["cities"][0]["shopTypes"][0].update(count=True),
+    lambda d: d["cities"][0]["shopTypes"][0].pop("shopType"),
+    lambda d: d["cities"][0]["shopTypes"].append({"shopType": "GROCERY", "count": 1}),
+    lambda d: d["cities"][0].pop("city"),
+    lambda d: d.update(cities="DEL"),
+    lambda d: d.update(startDateUnavailableSlots=["NOON"]),
+    lambda d: d.update(startDateFullyClosed="no"),
 ])
 def test_availability_that_breaks_the_contract_is_refused(breakage):
-    data = good_a()
+    data = good_free()
     breakage(data)
     with pytest.raises(ContractError):
-        parse_availability(data, Q, CLIENT)
+        parse_availability(data, Q)
 
 
 @pytest.mark.parametrize("breakage", [
-    lambda d: d.update(currency="USD"),
-    lambda d: d["rates"][0].update(imageSlotRatePerMonth="900.505"),
-    lambda d: d["rates"][0].update(imageSlotRatePerMonth=900),
-    lambda d: d["rates"][0].update(videoSlotRatePerMonth="-1"),
-    lambda d: d["rates"][0].update(videoSlotRatePerMonth="NaN"),
-    lambda d: d["reach"][0].update(dailyReachPerDevice="90"),
-    lambda d: d["reach"].append(dict(d["reach"][0])),
-    lambda d: d.update(rates=None),
+    lambda d: d["rateCards"][0].update(imageSlotRate="900.505"),
+    lambda d: d["rateCards"][0].update(imageSlotRate=900),
+    lambda d: d["rateCards"][0].update(videoSlotRate="-1"),
+    lambda d: d["rateCards"][0].update(videoSlotRate="NaN"),
+    lambda d: d["rateCards"][0].update(timeSlot="NOON"),
+    lambda d: d["rateCards"].append(dict(d["rateCards"][0])),
+    lambda d: d.update(rateCards={"a": 1}),
 ])
-def test_rates_that_break_the_contract_are_refused(breakage):
-    data = good_b()
+def test_rate_cards_that_break_the_contract_are_refused(breakage):
+    data = good_rates()
     breakage(data)
     with pytest.raises(ContractError):
-        parse_rates_and_reach(data, CLIENT)
+        parse_rate_cards(data, CLIENT, BRAND)
 
 
-def test_the_solver_runs_in_a_separate_process_and_keeps_nothing(one_solver_process):
-    """The same worker solves two different problems back to back; the second answer is
-    exactly what that problem gives on its own - nothing carried over from the first."""
-    lines = tuple(model.Line("A", 300 * (i + 1), 10 * (i + 1), (2, 2, 2)) for i in range(3))
-    p1 = model.Problem("one", lines, 3, 10 ** 6, None)
-    p2 = model.Problem("two", lines[:1], 3, 900 * 30, None)
-    first = one_solver_process.submit(model.solve, p1).result()
-    second = one_solver_process.submit(model.solve, p2).result()
-    assert (first["job_id"], second["job_id"]) == ("one", "two")
-    assert second == {**model.solve(p2), "ms": second["ms"]}
+@pytest.mark.parametrize("bad", [{}, {"totalCost": 10}, {"totalCost": "-1"}, {"totalCost": "1.234"}])
+def test_a_quote_that_breaks_the_contract_is_refused(bad):
+    with pytest.raises(ContractError):
+        parse_quote(bad)
 
 
 # ── the architecture review's fixes ──────────────────────────────────────────
@@ -496,35 +628,28 @@ def test_the_solver_runs_in_a_separate_process_and_keeps_nothing(one_solver_proc
 def test_solver_processes_are_spawned_never_forked_and_replaced_after_a_while():
     p = Planner(1, max_in_flight=1, per_user_per_min=1)
     try:
-        pool = p._pool
-        assert pool._mp_context.get_start_method() == "spawn"
-        assert pool._max_tasks_per_child == 500
+        assert p._pool._mp_context.get_start_method() == "spawn"
+        assert p._pool._max_tasks_per_child == 500
     finally:
         p.close()
 
 
-def test_a_solver_that_never_answers_is_replaced():
+def test_a_solver_that_never_answers_is_replaced(monkeypatch):
     class Hung(Executor):
         def submit(self, fn, /, *args, **kwargs):
             return Future()                                     # never completes
     p = Planner(1, max_in_flight=1, per_user_per_min=1, executor=Hung())
     recycled = []
     p._recycle = recycled.append
-    problem = model.Problem("h", (model.Line("A", 30, 1, (1,)),), 1, 30, None, time_limit_s=0.5)
+    problem = model.Problem("h", (model.Cell("A", 30, 1, 1),), 30, None, time_limit_s=0.5)
+    import genie.planner.engine as engine_module
+    real = asyncio.wait_for
 
-    async def go():
-        import genie.planner.engine as engine_module
-        real = engine_module.asyncio.wait_for
-
-        async def quick(aw, timeout):
-            return await real(aw, 0.05)
-        engine_module.asyncio.wait_for = quick
-        try:
-            with pytest.raises(PlanUnavailable):
-                await p.solve(problem)
-        finally:
-            engine_module.asyncio.wait_for = real
-    asyncio.run(go())
+    async def quick(aw, timeout):
+        return await real(aw, 0.05)
+    monkeypatch.setattr(engine_module.asyncio, "wait_for", quick)
+    with pytest.raises(PlanUnavailable):
+        asyncio.run(p.solve(problem))
     assert recycled == ["a solver process did not answer in time"]
 
 
@@ -540,19 +665,23 @@ def test_the_rate_limit_table_forgets_idle_users():
     assert len(p._recent) == 1
 
 
-def test_cached_inputs_are_stored_compressed():
-    state = install(ScopedSource())
-    one(TOKENS[0], body())
-    values = [v for k, (_, v) in state.sessions.kv._items.items() if ":plan:" in k]
-    assert values and all(v.startswith(PACKED) for v in values)
-    assert unpack(pack({"a": [1, 2]})) == {"a": [1, 2]}
-
-
 def test_genie_env_must_be_set_and_limits_must_be_sane(monkeypatch):
     monkeypatch.delenv("GENIE_ENV", raising=False)
     with pytest.raises(ValidationError):
         Settings(_env_file=None)                                # forgetting it stops the service
     for bad in ({"genie_plan_time_limit_s": 0}, {"genie_plan_alternatives_within_pct": 150},
-                {"genie_plan_workers": 0}):
+                {"genie_plan_workers": 0}, {"genie_plan_source": "sql"}):
         with pytest.raises(ValidationError):
             Settings(_env_file=None, genie_env="local", **bad)
+
+
+def test_the_solver_runs_in_a_separate_process_and_keeps_nothing(one_solver_process):
+    """The same worker solves two different problems back to back; the second answer is
+    exactly what that problem gives on its own - nothing carried over from the first."""
+    cells = tuple(model.Cell("A", 300 * (i + 1), 10 * (i + 1), 2) for i in range(3))
+    p1 = model.Problem("one", cells, 10 ** 6, None)
+    p2 = model.Problem("two", cells[:1], 900, None)
+    first = one_solver_process.submit(model.solve, p1).result()
+    second = one_solver_process.submit(model.solve, p2).result()
+    assert (first["job_id"], second["job_id"]) == ("one", "two")
+    assert second == {**model.solve(p2), "ms": second["ms"]}

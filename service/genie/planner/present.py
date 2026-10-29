@@ -1,19 +1,26 @@
-"""The solver's numbers, as the user sees them: rupees, codes, schedules, notices.
+"""The solver's numbers, as the user sees them: rupees, names, notices, and the campaign
+the plan is - ready to drop into the wizard.
 
-Money leaves as decimal strings ("17920.00"), as the BFF sends it. Every figure here is
-computed by code from the solver's integers - nothing is estimated or worded by a model.
+Money leaves as decimal strings ("17920.00"), as the BFF sends it. A plan's `cost` is the
+quote from simulate-cost, the same figure the wizard will show; each line's `listCost` is
+that line at the rate card's list price (surcharge days and billing's rounding are in the
+quote, not the lines). Nothing here is estimated or worded by a model.
 """
 from __future__ import annotations
 
-from datetime import date, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 
 from ..data.money import count, inr
 from . import model
-from .contract import Availability
+from .contract import DEVICE_TIER, PlanQuery
 from .engine import Prepared
 
 PAISA = Decimal("0.01")
+# How the campaign wizard names a city code (launch-campaign.yaml, R11: GGN is Gurugram).
+CITY_NAMES = {"DEL": "Delhi", "GGN": "Gurugram", "NOI": "Noida", "MUM": "Mumbai",
+              "BLR": "Bengaluru", "HYD": "Hyderabad", "CHN": "Chennai", "PUN": "Pune",
+              "FBD": "Faridabad", "GBD": "Ghaziabad", "GND": "Greater Noida",
+              "OTHERS": "Other cities"}
 
 
 def rupees(cost30: int) -> Decimal:
@@ -21,108 +28,93 @@ def rupees(cost30: int) -> Decimal:
     return (Decimal(cost30) / 3000).quantize(PAISA, rounding=ROUND_HALF_UP)
 
 
-def _day(d: date) -> str:
-    return f"{d:%b} {d.day}"
+def city_name(code: str) -> str:
+    return CITY_NAMES.get(code, code)
 
 
-def _span(start: date, a: int, b: int) -> str:
-    da, db = start + timedelta(days=a), start + timedelta(days=b)
-    if a == b:
-        return _day(da)
-    return f"{_day(da)}–{db.day}" if da.month == db.month else f"{_day(da)}–{_day(db)}"
-
-
-def runs(values, start: date, *, skip_zero: bool = True) -> list[tuple[int, str]]:
-    """Consecutive dates with the same value: [(value, "Nov 1–10"), ...]."""
-    out, i = [], 0
-    while i < len(values):
-        j = i
-        while j + 1 < len(values) and values[j + 1] == values[i]:
-            j += 1
-        if not (skip_zero and values[i] == 0):
-            out.append((values[i], _span(start, i, j)))
-        i = j + 1
-    return out
-
-
-def schedule_text(screens: list[int], start: date) -> str:
-    """"4 a day Nov 1–10" / "1 a day Nov 1–7; 1 a day Nov 11–15"."""
-    return "; ".join(f"{v} a day {span}" for v, span in runs(screens, start))
-
-
-def plan_json(rank: int, plan: dict, prep: Prepared, avail: Availability, *, budget: Decimal,
-              status: str, target: int | None, first: dict | None = None) -> dict:
-    lines, screen_days = [], 0
-    for r, xs in plan["x"].items():
-        row, line = prep.rows[r], prep.problem.lines[r]
-        y = sum(xs)
-        screen_days += y
-        lines.append({"contractId": row.contract_id, "contractCode": row.contract_code,
-                      "city": row.city, "cityName": row.city_name, "category": row.category,
-                      "daypart": row.daypart, "screens": list(xs),
-                      "schedule": schedule_text(list(xs), avail.start), "screenDays": y,
-                      "cost": str(rupees(line.price30 * y)), "reach": line.reach * y})
-    code_of = {row.contract_id: row.contract_code for row in prep.rows}
-    cost = rupees(plan["cost30"])
-    out = {"rank": rank, "cost": str(cost), "budgetLeft": str((budget - cost).quantize(PAISA)),
-           "reach": plan["reach"], "screenDays": screen_days,
-           "daysPlayed": avail.days - len(prep.dark_dates), "windowDays": avail.days,
-           "contracts": [code_of[c] for c in plan["contracts"]], "lines": lines}
-    if first is None:
-        out["label"] = (f"Cheapest plan that reaches {count(target)}" if status == model.TARGET_MET
-                        else f"Most reach for {inr(budget)}")
-    else:
-        dropped = [code_of[c] for c in first["contracts"] if c not in plan["contracts"]]
-        out["label"] = f"Without {', '.join(dropped)}" if dropped else "A different mix of contracts"
-        out["vsPlan1"] = {"cost": _signed(cost - rupees(first["cost30"])),
-                          "reach": plan["reach"] - first["reach"]}
-    return out
+def shop_name(code: str) -> str:
+    return code.replace("_", " ").capitalize()
 
 
 def _signed(d: Decimal) -> str:
     return f"+{d}" if d > 0 else str(d)
 
 
-def notices(out: dict, prep: Prepared, avail: Availability, *, budget: Decimal,
+def selections(plan: dict, prep: Prepared) -> list[dict]:
+    """The plan as the wizard books it: `selections` of POST /campaigns (§7.6)."""
+    return [{"city": prep.cells[c][0], "shopType": prep.cells[c][1], "deviceCount": n}
+            for c, n in sorted(plan["n"].items())]
+
+
+def plan_json(rank: int, plan: dict, prep: Prepared, q: PlanQuery, *, budget: Decimal,
+              quote: Decimal, status: str, target: int | None, brand_id: str,
+              first: dict | None = None, first_quote: Decimal | None = None) -> dict:
+    lines = []
+    for c, n in sorted(plan["n"].items()):
+        city, shop = prep.cells[c]
+        cell = prep.problem.cells[c]
+        lines.append({"city": city, "cityName": city_name(city), "shopType": shop,
+                      "shopTypeName": shop_name(shop), "screens": n, "reach": cell.reach * n,
+                      "listCost": str(rupees(cell.price30 * n))})
+    out = {"rank": rank, "cost": str(quote), "budgetLeft": str((budget - quote).quantize(PAISA)),
+           "reach": plan["reach"], "screens": sum(plan["n"].values()),
+           "cities": [city_name(g) for g in plan["groups"]], "lines": lines,
+           "campaign": {"startDate": q.start.isoformat(), "endDate": q.end.isoformat(),
+                        "timeSlots": list(q.dayparts), "imageSlotsRequested": q.image_slots,
+                        "videoSlotsRequested": q.video_slots, "deviceTier": DEVICE_TIER,
+                        "advertisedBrandId": brand_id, "selections": selections(plan, prep)}}
+    surcharge = quote - rupees(plan["cost30"])
+    if surcharge >= 1:
+        out["note"] = f"The price includes {inr(surcharge)} for surcharge days."
+    if first is None:
+        out["label"] = (f"Cheapest plan that reaches {count(target)}" if status == model.TARGET_MET
+                        else f"Most reach for {inr(budget)}")
+    else:
+        dropped = [city_name(g) for g in first["groups"] if g not in plan["groups"]]
+        out["label"] = f"Without {', '.join(dropped)}" if dropped else "A different mix of cities"
+        out["vsPlan1"] = {"cost": _signed(quote - first_quote), "reach": plan["reach"] - first["reach"]}
+    return out
+
+
+def notices(out: dict, prep: Prepared, q: PlanQuery, *, budget: Decimal,
             target: int | None) -> list[dict]:
     """What the user must know besides the plan, in plain words."""
     found = []
+    for n, code, why in ((prep.skipped_no_rate, "LINES_SKIPPED_NO_RATE", "no price set for this brand"),
+                         (prep.skipped_no_reach, "LINES_SKIPPED_NO_REACH", "no reach data")):
+        if n:
+            found.append({"code": code, "text": f"{count(n)} city and shop type"
+                                                f"{' pairs' if n != 1 else ' pair'} left out: {why}."})
+    short = [d for d in q.dayparts if prep.plays[d] < q.days]
+    if short:
+        found.append({"code": "START_DAY_SHORT",
+                      "text": f"{' and '.join(d.capitalize() for d in short)} "
+                              f"{'has' if len(short) == 1 else 'have'} already ended today, so the "
+                              f"first day plays without {'it' if len(short) == 1 else 'them'}."})
     status = out["status"]
-    if prep.skipped_no_rate:
-        found.append({"code": "LINES_SKIPPED_NO_RATE",
-                      "text": f"{count(prep.skipped_no_rate)} line"
-                              f"{'s' if prep.skipped_no_rate != 1 else ''} skipped: no rate set."})
-    if prep.skipped_no_reach:
-        found.append({"code": "LINES_SKIPPED_NO_REACH",
-                      "text": f"{count(prep.skipped_no_reach)} line"
-                              f"{'s' if prep.skipped_no_reach != 1 else ''} skipped: no reach data."})
-    if prep.dark_dates and len(prep.dark_dates) < avail.days:
-        flags = [0 if t in prep.dark_dates else 1 for t in range(avail.days)]
-        spans = ", ".join(span for v, span in runs(flags, avail.start, skip_zero=False) if v == 0)
-        found.append({"code": "NO_SCREENS_ON_DATES",
-                      "text": f"No free screens on {spans} – the campaign will not play those days."})
     if status == model.NO_INVENTORY:
         found.append({"code": "NO_INVENTORY",
-                      "text": "No free screens with a rate and reach in this window for these choices."})
+                      "text": "No screens are free for the whole window in these dayparts. Try "
+                              "fewer dayparts, fewer slots or other dates."})
     elif status == model.TARGET_OUT_OF_REACH:
-        best = out["plans"][0]["reach"]
+        best = out["plans"][0]["reach"] if out["plans"] else 0
         if out.get("target_needs30") is not None:
             text = (f"{inr(budget)} reaches at most {count(best)}. Reaching {count(target)} needs "
-                    f"{inr(rupees(out['target_needs30']))}.")
+                    f"about {inr(rupees(out['target_needs30']))}.")
         elif out.get("target_possible") is False:
-            most = sum(ln.reach * sum(ln.free) for ln in prep.problem.lines)
+            most = sum(c.reach * c.free for c in prep.problem.cells)
             text = (f"No plan in this window reaches {count(target)} – every free screen together "
                     f"reaches {count(most)}.")
         else:
             text = f"{inr(budget)} reaches at most {count(best)}, short of {count(target)}."
         found.append({"code": "TARGET_OUT_OF_REACH", "text": text})
     elif status == model.BUDGET_TOO_LOW:
-        text = f"{inr(budget)} can't play a screen on every date of the window."
+        text = f"{inr(budget)} doesn't buy one screen for the whole campaign."
         if out.get("min_budget30") is not None:
-            text += f" The smallest budget that does is {inr(rupees(out['min_budget30']))}."
+            text += f" The cheapest screen costs about {inr(rupees(out['min_budget30']))}."
         found.append({"code": "BUDGET_TOO_LOW", "text": text})
     elif status == model.NOT_PROVEN:
         found.append({"code": "NOT_PROVEN",
                       "text": "Genie couldn't finish this plan in time. Try again, or narrow the "
-                              "cities or dates."})
+                              "cities or shop types."})
     return found

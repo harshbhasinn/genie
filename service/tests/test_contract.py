@@ -8,12 +8,10 @@
 """
 from __future__ import annotations
 
-import pytest
 from fastapi.testclient import TestClient
 
 from genie.config import Settings
 from genie.main import app
-from genie.planner import present
 from .test_planner_api import TOKENS, ScopedSource, body, events, install, one
 
 
@@ -46,7 +44,9 @@ def test_money_is_always_to_the_paisa():
     result = dict(events(r.text))["result"]
     plan = [d for e, d in events(r.text) if e == "plan"][0]
     assert result["budget"] == "35000.50"
-    assert plan["budgetLeft"] == "40.50" and plan["cost"] == "34960.00"
+    assert plan["budgetLeft"] == "825.50" and plan["cost"] == "34175.00"
+    assert all(ln["listCost"].count(".") == 1 and len(ln["listCost"].split(".")[1]) == 2
+               for ln in plan["lines"])
 
 
 def test_a_plan_that_fails_part_way_still_ends_with_error_then_done(monkeypatch):
@@ -92,15 +92,6 @@ def test_a_browser_can_read_retry_after():
     with TestClient(app) as c:
         r = c.post("/v1/genie/plan", json=body(), headers={"Origin": "http://localhost:3000"})
     assert r.headers.get("access-control-expose-headers") == "Retry-After"
-
-
-@pytest.mark.parametrize("values, text", [
-    ([4, 4, 0, 1], "4 a day Nov 1–2; 1 a day Nov 4"),
-    ([0, 0, 0, 0], ""),
-])
-def test_schedule_wording(values, text):
-    from datetime import date
-    assert present.schedule_text(values, date(2026, 11, 1)) == text
 
 
 def test_a_refusal_before_the_stream_is_json_with_a_code():

@@ -91,10 +91,13 @@ class Settings(BaseSettings):
     genie_cors_origins: str = ""
 
     # ── campaign calculator ───────────────────────────────────────────
-    # Where free screens, rates and reach come from: off (the endpoint answers 503) or
-    # fixture (demo data, LOCAL ONLY). The backend's endpoints are added when their
-    # contract is shared - see design/calculator/availability-api-spec.md.
+    # Free screens, brand prices and quotes: off (the endpoint answers 503), bff (the
+    # dashboard's own availability-search, client-rate-cards and simulate-cost, read as the
+    # user) or fixture (demo data, LOCAL ONLY).
     genie_plan_source: str = "off"
+    # Reach per screen: off or fixture (demo, LOCAL ONLY). No API serves it yet - it is the
+    # one input the calculator still needs from another team.
+    genie_plan_reach: str = "off"
     # Solver processes. One per vCPU the task has: os.cpu_count() reports the HOST's
     # cores inside a container, not the task's share, so it is set, never guessed.
     genie_plan_workers: int = 1
@@ -128,8 +131,16 @@ class Settings(BaseSettings):
     @classmethod
     def _known_plan_source(cls, v: str) -> str:
         v = v.strip().lower()
+        if v not in ("off", "bff", "fixture"):
+            raise ValueError("GENIE_PLAN_SOURCE must be 'off', 'bff' or 'fixture'")
+        return v
+
+    @field_validator("genie_plan_reach")
+    @classmethod
+    def _known_plan_reach(cls, v: str) -> str:
+        v = v.strip().lower()
         if v not in ("off", "fixture"):
-            raise ValueError("GENIE_PLAN_SOURCE must be 'off' or 'fixture'")
+            raise ValueError("GENIE_PLAN_REACH must be 'off' or 'fixture'")
         return v
 
     @field_validator("genie_plan_workers", "genie_plan_max_in_flight", "genie_plan_per_user_per_min",
@@ -156,9 +167,12 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _fixture_is_local_only(self):
-        # Demo prices must never be shown to a real user.
-        if self.genie_plan_source == "fixture" and self.genie_env != "local":
-            raise ValueError("GENIE_PLAN_SOURCE=fixture is demo data and only runs with GENIE_ENV=local")
+        # Demo prices or demo reach must never be shown to a real user.
+        if self.genie_env != "local":
+            for name, value in (("GENIE_PLAN_SOURCE", self.genie_plan_source),
+                                ("GENIE_PLAN_REACH", self.genie_plan_reach)):
+                if value == "fixture":
+                    raise ValueError(f"{name}=fixture is demo data and only runs with GENIE_ENV=local")
         return self
 
     @field_validator("genie_live_wording")
@@ -227,6 +241,7 @@ class Settings(BaseSettings):
             "redis_configured": bool(self.genie_redis_url.get_secret_value()),
             "cors_origins": list(self.cors_origins),
             "plan_source": self.genie_plan_source,
+            "plan_reach": self.genie_plan_reach,
             "plan_workers": self.genie_plan_workers,
         }
 

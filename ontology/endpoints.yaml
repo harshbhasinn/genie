@@ -102,3 +102,16 @@ endpoints:
   clients.detail:
     get: /api/v1/clients/{clientId}
     for: Who a brand's contact is, and who manages it (CLIENT_INFO only).
+
+  # ── the campaign calculator (CAMPAIGN_CREATION_GUIDE.md §7.2, §7.5, §12.2) ─
+  campaigns.availability_search:
+    post: /api/v1/campaigns/availability-search
+    read_only: true
+    for: How many screens per city x shop type are free in EVERY date x daypart of a window, for a slot choice.
+  campaigns.simulate_cost:
+    post: /api/v1/campaigns/simulate-cost
+    read_only: true
+    for: The exact brand price of a plan, surcharges and rounding included. Sent without a campaignId, so nothing is saved.
+  rate_cards.of_partner:
+    get: /api/v1/client-rate-cards
+    for: The partner's prices to its brands, per city x shop type x daypart, brand-specific rows first.

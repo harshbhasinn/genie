@@ -1,24 +1,21 @@
-"""The calculator's INPUTS, cached. Plans are never cached or stored anywhere.
+"""The calculator's INPUTS, cached. Plans and quotes are never cached or stored anywhere.
 
-  free screens     {prefix}plan:free:{owner}:{client}:{sha256(query)}       90 s
-  rates + reach    {prefix}plan:rr:{owner}:{client}:{ratesVersion}:{reachVersion}   6 h
+  free screens   {prefix}plan:free:{owner}:{client}:{sha256(question)}    90 s
+  rate cards     {prefix}plan:rates:{owner}:{client}                      5 min
+  reach          {prefix}plan:reach:{owner}:{client}                      1 h
 
-Keyed by the verified OWNER (the user), not just the partner. The backend may one day
-show two users of the same partner different contracts (a manager scoped to some
-brands), and a key shared by both would hand one the other's view. Per-user keys make
-that impossible whatever the backend decides; widen to partner x access level only once
-the backend confirms its scoping rule.
+Keyed by the verified OWNER (the user), not just the partner. The backend may show two
+users of the same partner different things (a manager scoped to some brands), and a key
+shared by both would hand one the other's view. Per-user keys make that impossible whatever
+the backend decides.
 
-Rates and reach are versioned: every free-screens response carries the current versions,
-so a cached rate card is used only while its version is still the current one, and a
-changed rate is read fresh at once.
+Rate cards carry no version on the BFF, so they are kept only 5 minutes - and every plan
+is priced again by simulate-cost before it is shown, so a changed rate can never reach a
+user as a final price.
 
 What is stored is the backend's `data`, already checked, and it is checked AGAIN on the
-way out - a corrupted or tampered cache value is refused, never planned from.
-
-Stored COMPRESSED: free-screen data is mostly repeated small integers, so ~93 KB of JSON
-today is ~5 KB stored (~2 MB -> ~100 KB at 100 cities x 20 categories). The Redis it
-shares with chat sessions then never evicts a conversation to make room for a cache.
+way out - a corrupted or tampered value is refused, never planned from. Stored compressed
+(zlib), so the Redis it shares with chat sessions never evicts a conversation for a cache.
 """
 from __future__ import annotations
 
@@ -28,16 +25,18 @@ import hashlib
 import json
 import logging
 import zlib
+from decimal import Decimal
 
 from ..store import KeyValue
-from .contract import (Availability, AvailabilityQuery, ContractError, RatesAndReach,
-                       parse_availability, parse_rates_and_reach)
-from .source import PlanningSource
+from .contract import (Availability, ContractError, PlanQuery, RateCard, Reach,
+                       parse_availability, parse_quote, parse_rate_cards, parse_reach)
+from .source import PlanningSource, ReachSource
 
 log = logging.getLogger(__name__)
 
 FREE_TTL_S = 90
-RATES_TTL_S = 6 * 60 * 60
+RATES_TTL_S = 5 * 60
+REACH_TTL_S = 60 * 60
 PACKED = "z1:"                      # zlib + base64; the KV holds text
 
 
@@ -53,44 +52,41 @@ def unpack(text: str):
 
 
 class PlanningInputs:
-    def __init__(self, kv: KeyValue, source: PlanningSource, prefix: str = "genie:",
-                 free_ttl_s: int = FREE_TTL_S, rates_ttl_s: int = RATES_TTL_S):
-        self.kv, self.source, self.prefix = kv, source, prefix
-        self.free_ttl_s, self.rates_ttl_s = free_ttl_s, rates_ttl_s
+    def __init__(self, kv: KeyValue, source: PlanningSource, reach: ReachSource,
+                 prefix: str = "genie:"):
+        self.kv, self.source, self.reach_source, self.prefix = kv, source, reach, prefix
 
-    async def availability(self, token: str | None, owner: str, client_id: str,
-                           q: AvailabilityQuery) -> Availability:
-        digest = hashlib.sha256(q.key().encode()).hexdigest()
-        key = f"{self.prefix}plan:free:{owner}:{client_id}:{digest}"
-        cached = await self._read(key, lambda d: parse_availability(d, q, client_id))
-        if cached is not None:
-            return cached
-        data = await self.source.availability(token, client_id, q)
-        parsed = parse_availability(data, q, client_id)              # raises ContractError
-        await self.kv.set(key, pack(data), self.free_ttl_s)
-        return parsed
+    async def availability(self, token, owner: str, client_id: str, q: PlanQuery) -> Availability:
+        key = f"{self.prefix}plan:free:{owner}:{client_id}:{hashlib.sha256(q.key().encode()).hexdigest()}"
+        return await self._cached(key, FREE_TTL_S, lambda d: parse_availability(d, q),
+                                  lambda: self.source.availability(token, client_id, q))
 
-    async def rates_and_reach(self, token: str | None, owner: str, client_id: str,
-                              rates_version: str, reach_version: str) -> RatesAndReach:
-        key = f"{self.prefix}plan:rr:{owner}:{client_id}:{rates_version}:{reach_version}"
-        cached = await self._read(key, lambda d: parse_rates_and_reach(d, client_id))
-        if cached is not None:
-            return cached
-        data = await self.source.rates_and_reach(token, client_id)
-        parsed = parse_rates_and_reach(data, client_id)
-        # Cached under the versions it CARRIES. If they moved between the two reads, this
-        # is the newer data; the next free-screens read will name these versions.
-        key = f"{self.prefix}plan:rr:{owner}:{client_id}:{parsed.rates_version}:{parsed.reach_version}"
-        await self.kv.set(key, pack(data), self.rates_ttl_s)
-        return parsed
+    async def rate_cards(self, token, owner: str, client_id: str, brand_id: str) -> RateCard:
+        key = f"{self.prefix}plan:rates:{owner}:{client_id}"
+        return await self._cached(key, RATES_TTL_S,
+                                  lambda d: parse_rate_cards(d, client_id, brand_id),
+                                  lambda: self.source.rate_cards(token, client_id))
 
-    async def _read(self, key: str, parse):
+    async def reach(self, token, owner: str, client_id: str) -> Reach:
+        key = f"{self.prefix}plan:reach:{owner}:{client_id}"
+        return await self._cached(key, REACH_TTL_S, parse_reach,
+                                  lambda: self.reach_source.reach(token, client_id))
+
+    async def quote(self, token, client_id: str, brand_id: str, q: PlanQuery,
+                    selections: list[dict]) -> Decimal:
+        """The exact brand price of one plan. Never cached: it is the number the user is
+        shown as the price."""
+        return parse_quote(await self.source.quote(token, client_id, brand_id, q, selections))
+
+    async def _cached(self, key: str, ttl: int, parse, fetch):
         raw = await self.kv.get(key)
-        if raw is None:
-            return None
-        try:
-            return parse(unpack(raw))
-        except (ValueError, binascii.Error, zlib.error, ContractError) as err:
-            log.warning("planning cache value refused (%s) - reading fresh", type(err).__name__)
-            await self.kv.delete(key)
-            return None
+        if raw is not None:
+            try:
+                return parse(unpack(raw))
+            except (ValueError, binascii.Error, zlib.error, ContractError) as err:
+                log.warning("planning cache value refused (%s) - reading fresh", type(err).__name__)
+                await self.kv.delete(key)
+        data = await fetch()
+        parsed = parse(data)                                  # raises ContractError
+        await self.kv.set(key, pack(data), ttl)
+        return parsed
