@@ -43,7 +43,7 @@ from ..wire import sse as _sse
 from . import model
 from .contract import DAYPARTS, ContractError, PlanQuery
 from .engine import PlanMixUp, Planner, PlannerRefused, PlanUnavailable, prepare
-from .present import notices, plan_json, selections
+from .present import notices, plan_json, rupees, selections
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/v1/genie", tags=["calculator"])
@@ -103,6 +103,12 @@ def _bff_failure(err: BffError, what: str) -> JSONResponse:
 class _Refused(Exception):
     def __init__(self, response: JSONResponse):
         self.response = response
+
+
+# Genie's list price and the BFF's quote may differ by surcharge days and rounding, never by
+# more: outside this band the rate card is not being read the way billing reads it (e.g. a
+# per-play figure taken as monthly), and no plan built on it can be trusted.
+QUOTE_VS_LIST = (Decimal("0.5"), Decimal("3"))
 
 
 @router.post("/plan")
@@ -177,6 +183,13 @@ async def plan(req: PlanIn, request: Request):
                     break               # list prices fit, the surcharged quote does not
                 return out, None, problem
             quote = await quote_of(out["plans"][0])
+            listed = rupees(out["plans"][0]["cost30"])
+            if listed and not QUOTE_VS_LIST[0] <= quote / listed <= QUOTE_VS_LIST[1]:
+                log.error("quote %s vs list price %s: the rate card is not read as billing reads it",
+                          quote, listed)
+                raise _Refused(_fail(502, "BAD_BACKEND_DATA",
+                                     "The rate card and the dashboard's own price disagree, so no "
+                                     "plan was made."))
             if quote <= req.budget:
                 return out, quote, problem
             cap = min(cap - 30, cap * budget_paise // int(quote * 100))

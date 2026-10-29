@@ -209,12 +209,30 @@ def test_the_quote_is_the_price_and_a_plan_over_budget_is_never_shown():
     assert float(p1["cost"]) <= 35000
     assert p1["note"].startswith("The price includes ₹")
     assert sum(1 for kind, *_ in source.calls if kind == "quote") >= 2      # priced, re-solved, priced
-    source = ScopedSource(surcharge=Decimal("5"))
+    source = ScopedSource(surcharge=Decimal("2.9"))
     install(source)
     r = one(TOKENS[0], body(target=None, budget="7000"))
     result = dict(events(r.text))["result"]
     assert result["status"] == "QUOTE_OVER_BUDGET" and plans_of(r) == []
     assert "QUOTE_OVER_BUDGET" in {n["code"] for n in result["notices"]}
+
+
+@pytest.mark.parametrize("factor", ["5", "0.2", "180"])
+def test_a_quote_that_disagrees_with_the_rate_card_plans_nothing(factor):
+    """180x is what a per-play rate read as a monthly one would look like: refused, never
+    planned from."""
+    install(ScopedSource(surcharge=Decimal(factor)))
+    r = one(TOKENS[0], body(target=None))
+    assert (r.status_code, r.json()["code"]) == (502, "BAD_BACKEND_DATA")
+    assert app.state.planner.in_flight == 0
+
+
+def test_the_quote_sends_one_row_per_daypart():
+    q = PlanQuery(TOMORROW, TOMORROW, ("MORNING", "EVENING"), 1, 0)
+    sent = q.quote_body(CLIENT, BRAND, [{"city": "DEL", "shopType": "GROCERY", "deviceCount": 2}])
+    assert sent["selections"] == [
+        {"city": "DEL", "shopType": "GROCERY", "deviceCount": 2, "timeSlot": "MORNING"},
+        {"city": "DEL", "shopType": "GROCERY", "deviceCount": 2, "timeSlot": "EVENING"}]
 
 
 def test_the_partner_side_of_the_price_never_reaches_the_user():
@@ -543,7 +561,9 @@ def test_the_bff_source_reads_as_the_user_and_saves_nothing():
     assert dict(rates.url.params) == {"parentClientId": CLIENT, "rateCardType": "BROADCAST"}
     sent = json.loads(quote.content)
     assert "campaignId" not in sent and sent["advertisedBrandId"] == BRAND
-    assert sent["selections"] == [{"city": "DEL", "shopType": "GROCERY", "deviceCount": 1}]
+    # one row per daypart, each with its timeSlot (§7.5; QA refuses a row without one)
+    assert sent["selections"] == [{"city": "DEL", "shopType": "GROCERY", "deviceCount": 1,
+                                   "timeSlot": "MORNING"}]
     assert parse_quote(s) == Decimal("2950.00")                 # the brand price only
     assert parse_availability(a, q).counts == {("DEL", "GROCERY"): 4}
     assert parse_rate_cards(r, CLIENT, BRAND).rates[("DEL", "GROCERY", "MORNING")].ipm_paise == 90000

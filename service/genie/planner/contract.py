@@ -68,12 +68,17 @@ class PlanQuery:
 
     def quote_body(self, client_id: str, brand_id: str, selections: list[dict]) -> dict:
         """simulate-cost's request (§7.5). No campaignId, ever: without one, billing saves
-        nothing - that is what makes this a read."""
+        nothing - that is what makes this a read.
+
+        Its selections are ONE ROW PER DAYPART, each with a `timeSlot` (§7.5; QA refuses a
+        row without one: "selections[0].timeSlot: must not be null", 2026-10-29). The
+        create-campaign selections the wizard takes have no daypart (§7.6), so the plan's
+        own `campaign` block keeps them without."""
         return {"clientId": client_id, "advertisedBrandId": brand_id,
                 "startDate": self.start.isoformat(), "endDate": self.end.isoformat(),
                 "timeSlots": list(self.dayparts), "imageSlotsRequested": self.image_slots,
                 "videoSlotsRequested": self.video_slots, "deviceTier": DEVICE_TIER,
-                "selections": selections}
+                "selections": [{**s, "timeSlot": d} for s in selections for d in self.dayparts]}
 
     def key(self) -> str:
         """Stable text for a cache key: the same question always gives the same text."""

@@ -108,12 +108,11 @@ class FixtureSource:
     async def quote(self, token, client_id, brand_id, q, selections):
         rates = {(c["city"], c["shopType"]): c["rates"] for c in self.doc["cells"]}
         paise = 0
-        for s in selections:
-            for d in q.dayparts:
-                image, video = rates[(s["city"], s["shopType"])][d]
-                monthly = q.image_slots * int(round(float(image) * 100)) \
-                    + q.video_slots * int(round(float(video) * 100))
-                paise += monthly * s["deviceCount"] * q.days            # / 30, below
+        for s in q.quote_body(client_id, brand_id, selections)["selections"]:   # one per daypart
+            image, video = rates[(s["city"], s["shopType"])][s["timeSlot"]]
+            monthly = q.image_slots * int(round(float(image) * 100)) \
+                + q.video_slots * int(round(float(video) * 100))
+            paise += monthly * s["deviceCount"] * q.days                # / 30, below
         total = (paise + 15) // 30                                       # to the paisa, half up
         return {"totalCost": f"{total // 100}.{total % 100:02d}"}
 
