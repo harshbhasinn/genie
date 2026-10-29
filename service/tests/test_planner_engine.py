@@ -259,13 +259,18 @@ def market(cities: int, shop_types: int, seed: int):
 
 @pytest.mark.parametrize("cities, shop_types, limit_s", [(10, 10, 1.0), (100, 20, 3.0)])
 def test_proven_within_the_time_limit(cities, shop_types, limit_s):
+    """At production's own limit (3 s): proven, and in time. Guards the HiGHS version too -
+    1.12 (scipy 1.17) took 2.6 s per solve here with presolve on. At 2,000 cells the tie-break
+    may run out of its own short allowance; the plan is still proven best on its main goal."""
     cells = market(cities, shop_types, seed=cities)
     total = sum(c.price30 * c.free for c in cells)
     reach = sum(c.reach * c.free for c in cells)
     for budget, target in ((0.1, None), (0.5, None), (0.9, 0.3)):
         p = Problem("s", cells, int(total * budget), int(reach * target) if target else None,
-                    time_limit_s=10)
+                    time_limit_s=3.0)
         started = time.perf_counter()
         out = solve(p)
-        assert out["status"] in (model.BUDGET_PLAN, model.TARGET_MET)
+        assert out["status"] in (model.BUDGET_PLAN, model.TARGET_MET), out["status"]
+        if cities * shop_types <= 100:              # today's size: the tie-break finishes too
+            assert out["tiebreaks_unfinished"] == 0
         assert time.perf_counter() - started < limit_s, f"{len(cells)} cells took too long"

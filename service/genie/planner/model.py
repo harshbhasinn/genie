@@ -154,10 +154,13 @@ class _Solver:
         left = self.deadline - time.monotonic()
         if left <= 0:
             raise _Timeout
+        # presolve off: this model is a handful of rows, and HiGHS 1.12 (scipy >= 1.17) spends
+        # ~2 s presolving it at 2,000 cells - 5x the search itself - and overruns its time limit
+        # doing so. The search alone proves the same optimum (checked on scipy 1.15 and 1.17).
         res = milp(dense(self.price if cheapest else -self.reach), constraints=cons,
                    integrality=np.ones(nv),
                    bounds=Bounds(np.zeros(nv), np.concatenate([self.free, np.ones(ng)])),
-                   options={"time_limit": left, "mip_rel_gap": 0, "presolve": True})
+                   options={"time_limit": left, "mip_rel_gap": 0, "presolve": False})
         if res.status == 2:                          # infeasible: no plan keeps these limits
             return None
         if res.status == 1:
