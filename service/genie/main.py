@@ -31,6 +31,7 @@ from .planner.cache import PlanningInputs
 from .planner.engine import Planner
 from .planner.router import router as plan_router
 from .planner.source import build as build_plan_source
+from .planner.source import build_reach
 from .store import build as build_store
 
 log = logging.getLogger("genie")
@@ -88,12 +89,17 @@ async def lifespan(app: FastAPI):
     app.state.planner = Planner(cfg.genie_plan_workers,
                                 max_in_flight=cfg.genie_plan_max_in_flight,
                                 per_user_per_min=cfg.genie_plan_per_user_per_min)
-    plan_source = build_plan_source(cfg.genie_plan_source)
-    if plan_source is not None:
+    plan_source = build_plan_source(cfg.genie_plan_source, bff)
+    reach_source = build_reach(cfg.genie_plan_reach)
+    connected = plan_source is not None and reach_source is not None
+    if connected:
         app.state.planner.warm()
-    app.state.plan_inputs = (PlanningInputs(app.state.sessions.kv, plan_source,
+    else:
+        log.info("calculator not connected (source=%s, reach=%s)", cfg.genie_plan_source,
+                 cfg.genie_plan_reach)
+    app.state.plan_inputs = (PlanningInputs(app.state.sessions.kv, plan_source, reach_source,
                                             prefix=app.state.sessions.prefix)
-                             if plan_source is not None else None)
+                             if connected else None)
 
     log.info("ready on http://%s:%s | responder=%s | bff=%s",
              cfg.genie_host, cfg.genie_port, app.state.responder.mode,
@@ -179,7 +185,8 @@ async def healthz() -> dict:
         "ontology": ontology.stats,
         "responder": app.state.responder.mode,
         "sessions": await app.state.sessions.kv.health(),
-        "planner": {"source": cfg.genie_plan_source, "connected": app.state.plan_inputs is not None,
+        "planner": {"source": cfg.genie_plan_source, "reach": cfg.genie_plan_reach,
+                    "connected": app.state.plan_inputs is not None,
                     "workers": app.state.planner.workers, "in_flight": app.state.planner.in_flight},
         "token": token_state,
     }

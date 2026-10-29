@@ -118,12 +118,14 @@ Sessions live in this process's memory unless `GENIE_REDIS_URL` is set; then eve
 shares them through Redis (`docker compose up -d redis` for a local one). Either way a session is
 stored under the user the BFF verified, so one user's conversation can never load for another.
 
-**The campaign calculator** is `POST /v1/genie/plan`: a window, a budget, slots and an optional
-target reach in; the cheapest plan that reaches the target (or the most reach for the budget),
-screens per date per line, streamed back, then up to two alternatives on request. It is an exact
-solver (HiGHS through scipy), run in its own processes so chat never waits, and it never stores a
-plan. Locally, `GENIE_PLAN_SOURCE=fixture` serves demo data; the real free-screen and rate
-endpoints are specified for the backend team in `design/calculator/availability-api-spec.md`.
+**The campaign calculator** is `POST /v1/genie/plan`: a window, dayparts, slots, a brand, a budget
+and an optional target reach in; out comes a campaign as Adgrid books it - how many screens per
+city x shop type - the cheapest that reaches the target (or the most reach for the budget), priced
+by `simulate-cost`, then up to two alternatives on request. Each plan carries the wizard's own
+`selections`. It is an exact solver (HiGHS through scipy), run in its own processes so chat never
+waits, and it never stores a plan. Free screens, prices and quotes come from the BFF's existing
+reads (`GENIE_PLAN_SOURCE=bff`); reach has no API yet, so it is demo data locally
+(`GENIE_PLAN_REACH=fixture`). The booking model is in the backend's `CAMPAIGN_CREATION_GUIDE.md`.
 
 ```bash
 curl -N -X POST http://127.0.0.1:9030/v1/genie/chat   -H 'Content-Type: application/json'   -d '{"message":"what is my wallet balance",

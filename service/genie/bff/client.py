@@ -97,20 +97,35 @@ class BffClient:
         The template is what gets logged and reported, so a client id or user id
         never ends up in a log line either.
         """
+        return await self._send("GET", template, token=token, path_params=path_params,
+                                params=params)
+
+    async def post_read(self, template: str, *, token: str | None, body: dict,
+                        path_params: dict[str, str] | None = None) -> BffResponse:
+        """POST to one of the READ-ONLY POST endpoints (the availability search, the price
+        preview): a question too long for a query string. Nothing else may come through
+        here - the endpoint file marks each one `read_only` and a test holds the list."""
+        return await self._send("POST", template, token=token, path_params=path_params,
+                                body=body)
+
+    async def _send(self, method: str, template: str, *, token: str | None,
+                    path_params: dict[str, str] | None = None,
+                    params: dict[str, Any] | None = None,
+                    body: dict | None = None) -> BffResponse:
         if not token:
             raise BffError("signed_out", "no token for this request", endpoint=template)
         path = template.format(**(path_params or {}))
         started = time.perf_counter()
         try:
-            resp = await self._client.get(path, params=params,
-                                          headers={"Authorization": f"Bearer {token}"})
+            resp = await self._client.request(method, path, params=params, json=body,
+                                              headers={"Authorization": f"Bearer {token}"})
         except httpx.TimeoutException:
             raise BffError("unavailable", "the dashboard API timed out", endpoint=template)
         except httpx.HTTPError as err:
             raise BffError("unavailable", f"the dashboard API could not be reached "
                                           f"({type(err).__name__})", endpoint=template)
         ms = int((time.perf_counter() - started) * 1000)
-        log.info("bff GET %s -> %s in %sms", template, resp.status_code, ms)
+        log.info("bff %s %s -> %s in %sms", method, template, resp.status_code, ms)
 
         if resp.status_code == 401:
             raise BffError("signed_out", "the session has expired", status=401, endpoint=template)

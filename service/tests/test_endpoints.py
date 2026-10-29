@@ -1,9 +1,10 @@
 """The endpoint file is the only place a BFF path is written - and it agrees with the spec.
 
-  - every path in ontology/endpoints.yaml is a GET in reference/bff-openapi.json
+  - every path in ontology/endpoints.yaml is in reference/bff-openapi.json with its method
+  - the only POSTs are the read-only ones named here, each checked against the guide
   - every entry is used by the code: a dead entry is an endpoint nobody reads
   - no path is spelled in the service's code
-  - the file's own rules hold: GET only, /api/v1 only, each path once
+  - the file's own rules hold: reads only, /api/v1 only, each path once
 """
 from __future__ import annotations
 
@@ -14,7 +15,7 @@ from pathlib import Path
 import pytest
 
 from genie.bff import endpoints as registry
-from genie.bff.endpoints import EndpointError, endpoint, endpoints
+from genie.bff.endpoints import EndpointError, endpoint, endpoints, method_of
 
 ROOT = Path(__file__).resolve().parents[2]
 CODE = ROOT / "service" / "genie"
@@ -27,10 +28,24 @@ def code_files():
     return [p for p in CODE.rglob("*.py") if p.name != "endpoints.py"]
 
 
-def test_every_endpoint_is_a_get_in_the_spec():
-    missing = [f"{name}: {path}" for name, path in endpoints().items()
-               if "get" not in SPEC["paths"].get(path, {})]
-    assert not missing, f"not a GET in the spec: {missing}"
+# The POSTs Genie may send. Each is a READ: CAMPAIGN_CREATION_GUIDE.md §7.2 (the search
+# reads availability) and §7.5 ("Nothing is saved. No campaignId is sent, so billing
+# writes nothing"). Adding one here is a reviewed decision, not an edit to the yaml.
+READ_ONLY_POSTS = {
+    "campaigns.availability_search": "/api/v1/campaigns/availability-search",
+    "campaigns.simulate_cost": "/api/v1/campaigns/simulate-cost",
+}
+
+
+def test_every_endpoint_is_in_the_spec_with_its_method():
+    missing = [f"{name}: {method_of(name).upper()} {path}" for name, path in endpoints().items()
+               if method_of(name) not in SPEC["paths"].get(path, {})]
+    assert not missing, f"not in the spec: {missing}"
+
+
+def test_the_only_posts_are_the_read_only_ones():
+    posts = {name: path for name, path in endpoints().items() if method_of(name) == "post"}
+    assert posts == READ_ONLY_POSTS
 
 
 def test_every_endpoint_is_used_and_every_use_is_listed():
@@ -47,6 +62,8 @@ def test_no_path_is_written_in_the_code():
 
 @pytest.mark.parametrize("body, why", [
     ("x:\n  post: /api/v1/campaigns\n", "only reads"),
+    ("x:\n  post: /api/v1/campaigns\n  read_only: false\n", "only reads"),
+    ("x:\n  get: /api/v1/me\n  post: /api/v1/me\n", "only reads"),
     ("x:\n  get: /api/v2/campaigns\n", "not under /api/v1/"),
     ("x:\n  get: /api/v1/me\ny:\n  get: /api/v1/me\n", "listed twice"),
 ])

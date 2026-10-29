@@ -32,10 +32,11 @@ from collections import deque
 from concurrent.futures import Executor, ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from dataclasses import dataclass
+from datetime import date
 from decimal import Decimal
 
 from . import model
-from .contract import Availability, RatesAndReach, Row
+from .contract import Availability, Cell, PlanQuery, RateCard, Reach
 
 log = logging.getLogger(__name__)
 
@@ -61,7 +62,7 @@ class PlanMixUp(Exception):
 
 def _warm() -> None:
     """Each solver process loads scipy once, when it starts - not on a user's first plan."""
-    model.solve(model.Problem("warm", (model.Line("w", 30, 1, (1,)),), 1, 30, None))
+    model.solve(model.Problem("warm", (model.Cell("w", 30, 1, 1),), 30, None))
 
 
 class Planner:
@@ -166,34 +167,59 @@ class Planner:
 @dataclass(frozen=True, slots=True)
 class Prepared:
     problem: model.Problem
-    rows: tuple[Row, ...]               # rows[i] is problem.lines[i]
+    cells: tuple[Cell, ...]             # cells[i] is problem.cells[i]
+    plays: dict[str, int]               # days each chosen daypart plays (the start day may be short)
     skipped_no_rate: int
     skipped_no_reach: int
-    dark_dates: tuple[int, ...]         # dates with no usable free screen
 
 
-def prepare(avail: Availability, rr: RatesAndReach, *, budget: Decimal, target: int | None,
-            time_limit_s: float) -> Prepared:
-    """Join free screens with rates (contract x city x category x daypart) and reach
-    (city x category x daypart). A row with no rate - or a zero rate for a slot type the
-    campaign uses - or no reach is left out, and counted so the user is told."""
-    lines, rows = [], []
+def prepare(q: PlanQuery, avail: Availability, rates: RateCard, reach: Reach, *,
+            today: date, budget: Decimal, target: int | None, time_limit_s: float) -> Prepared:
+    """One line per city x shop type with free screens. Its price and reach are for ONE
+    screen over the whole campaign, every chosen daypart:
+
+        price = sum over dayparts (img x IPM + vid x VPM) / 30 x days that daypart plays
+        reach = sum over dayparts daily reach x days that daypart plays
+
+    (CAMPAIGN_CREATION_GUIDE.md §12.2: monthly rate x plays / 5,400 per daypart, which is
+    the rate / 30 per screen-day on the 60 s loop.) A daypart that has already ended on a
+    start day of today does not play that day (§7.1). A cell with no price for a chosen
+    daypart - or a zero price for a slot type the campaign uses - or no reach is left out,
+    and counted so the user is told; its price is never taken as free."""
+    plays = {d: q.days for d in q.dayparts}
+    if q.start == today:
+        for d in avail.start_date_unavailable:
+            if d in plays:
+                plays[d] -= 1
+    cells, kept = [], []
     no_rate = no_reach = 0
-    img, vid = avail.image_slots, avail.video_slots
-    for row in avail.rows:
-        rate = rr.rates.get(row.rate_key)
-        if rate is None or (img and not rate.ipm_paise) or (vid and not rate.vpm_paise):
+    for cell, free in sorted(avail.counts.items()):
+        city, shop = cell
+        price30 = people = 0
+        priced = reached = True
+        for d in q.dayparts:
+            rate = rates.rates.get((city, shop, d))
+            if rate is None or (q.image_slots and not rate.ipm_paise) \
+                    or (q.video_slots and not rate.vpm_paise):
+                priced = False
+                break
+            daily = reach.daily.get((city, shop, d))
+            if not daily:
+                reached = False
+            price30 += (q.image_slots * (rate.ipm_paise or 0)
+                        + q.video_slots * (rate.vpm_paise or 0)) * plays[d]
+            people += (daily or 0) * plays[d]
+        if not priced:
             no_rate += 1
             continue
-        reach = rr.reach.get(row.reach_key)
-        if not reach:
+        if not reached:
             no_reach += 1
             continue
-        lines.append(model.Line(row.contract_id, img * rate.ipm_paise + vid * rate.vpm_paise,
-                                reach, row.free))
-        rows.append(row)
-    dark = tuple(t for t in range(avail.days) if not any(ln.free[t] for ln in lines))
-    problem = model.Problem(job_id=uuid.uuid4().hex, lines=tuple(lines), days=avail.days,
+        if price30 <= 0:
+            continue                                    # every daypart already over
+        cells.append(model.Cell(group=city, price30=price30, reach=people, free=free))
+        kept.append(cell)
+    problem = model.Problem(job_id=uuid.uuid4().hex, cells=tuple(cells),
                             budget30=int(budget * 100) * 30, target=target,
                             time_limit_s=time_limit_s)
-    return Prepared(problem, tuple(rows), no_rate, no_reach, dark)
+    return Prepared(problem, tuple(kept), plays, no_rate, no_reach)
