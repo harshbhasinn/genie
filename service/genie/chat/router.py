@@ -1,18 +1,15 @@
-"""POST /v1/genie/chat — SSE.
+"""POST /v1/genie/chat - one message in, one JSON answer out.
 
-Event protocol, stable from here:
+    200  {"sessionId", "turnId", "mode", "blocks": [{"type", "content", "meta"}], "latencyMs"}
+    422  {"code": "INVALID_REQUEST", "message", "retryable", "fields"}
+    500  {"code": "INTERNAL_ERROR", "message", "retryable": true}
 
-    event: start   {"sessionId", "turnId", "mode"}
-    event: block   {"type", "content", "meta"}     one per block, incl. tokens
-    event: done    {"turnId", "latencyMs", "blocks"}
-    event: error   {"code", "message", "retryable"}
+`blocks` are in display order. There is no streaming: the `text` block carries the whole
+answer. Send `sessionId` back with the next message to continue the conversation.
 
 Field names are camelCase on the wire, in and out (genie/wire.py). The old snake_case
 request spellings are refused (422), never silently ignored - a dropped sessionId would
 otherwise quietly start a new conversation every turn.
-
-`done` always fires, including after `error`, so a client can close cleanly on
-one event rather than guessing from a dropped connection.
 """
 from __future__ import annotations
 
@@ -20,16 +17,15 @@ import asyncio
 import logging
 import time
 import uuid
-from collections.abc import AsyncIterator
 
 from fastapi import APIRouter, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
 from ..auth.caller import identity_for, owner_for, token_for
 from ..auth.identity import Identity
-from ..wire import sse as _sse
+from ..wire import refuse, reply
 from .responder import Responder
 from .session import Session, SessionStore, UIContext
 
@@ -77,7 +73,7 @@ class ChatRequest(BaseModel):
 
 
 @router.post("/chat")
-async def chat(req: ChatRequest, request: Request) -> StreamingResponse:
+async def chat(req: ChatRequest, request: Request) -> JSONResponse:
     responder: Responder = request.app.state.responder
     store: SessionStore = request.app.state.sessions
 
@@ -90,48 +86,32 @@ async def chat(req: ChatRequest, request: Request) -> StreamingResponse:
 
     turn_id = uuid.uuid4().hex[:12]
     started = time.perf_counter()
+    blocks: list[dict] = []
+    tokens: list[str] = []
+    failed = False
+    try:
+        async for block in responder.respond(session, req.message, token=token):
+            if block.type == "token":           # streaming pieces: the text block carries all
+                tokens.append(block.content)
+                continue
+            blocks.append({"type": block.type, "content": block.content, "meta": block.meta})
+    except asyncio.CancelledError:
+        raise
+    except Exception:  # noqa: BLE001 - the details go to the log, never to the browser
+        log.exception("turn %s failed", turn_id)
+        failed = True
+    finally:
+        # However the turn ended, so a follow-up asked before an error is still
+        # answerable next turn.
+        await store.save(session)
 
-    async def stream() -> AsyncIterator[str]:
-        count = 0
-        saved = False
-
-        async def save() -> None:
-            # However the turn ended, so a follow-up asked before an error or a dropped
-            # connection is still answerable next turn. Once.
-            nonlocal saved
-            if not saved:
-                saved = True
-                await store.save(session)
-
-        try:
-            yield _sse("start", {"session_id": session.id, "turn_id": turn_id,
-                                 "mode": responder.mode})
-            try:
-                async for block in responder.respond(session, req.message, token=token):
-                    if await request.is_disconnected():
-                        log.info("client gone, turn=%s abandoning", turn_id)
-                        return
-                    count += 1
-                    yield _sse("block", {"type": block.type, "content": block.content,
-                                         "meta": block.meta})
-            except asyncio.CancelledError:
-                raise
-            except Exception:  # noqa: BLE001 — the stream must not die silently
-                # The details go to the log, never to the browser.
-                log.exception("turn %s failed", turn_id)
-                yield _sse("error", {"code": "INTERNAL_ERROR",
-                                     "message": "Genie couldn't finish this answer. Try again.",
-                                     "retryable": True})
-            await save()
-            elapsed = int((time.perf_counter() - started) * 1000)
-            log.info("turn=%s blocks=%d ms=%d screen=%s",
-                     turn_id, count, elapsed, session.context.screen)
-            yield _sse("done", {"turn_id": turn_id, "latency_ms": elapsed, "blocks": count})
-        finally:
-            await save()
-
-    return StreamingResponse(
-        stream(), media_type="text/event-stream; charset=utf-8",
-        headers={"Cache-Control": "no-cache", "Connection": "keep-alive",
-                 "X-Accel-Buffering": "no"},  # nginx would otherwise buffer the stream
-    )
+    elapsed = int((time.perf_counter() - started) * 1000)
+    log.info("turn=%s blocks=%d ms=%d screen=%s failed=%s",
+             turn_id, len(blocks), elapsed, session.context.screen, failed)
+    if failed:
+        return refuse(500, "INTERNAL_ERROR", "Genie couldn't finish this answer. Try again.")
+    if tokens and not any(b["type"] in ("text", "error") for b in blocks):
+        # Every answer path ends on a text block; never lose words if one does not.
+        blocks.append({"type": "text", "content": "".join(tokens), "meta": {"final": True}})
+    return reply({"session_id": session.id, "turn_id": turn_id, "mode": responder.mode,
+                  "blocks": blocks, "latency_ms": elapsed})

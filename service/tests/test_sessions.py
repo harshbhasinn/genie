@@ -76,16 +76,10 @@ def turn(c, token, message, session_id=None):
         "message": message, "sessionId": session_id,
         "uiContext": {"screen": "command_centre", "role": "AD_PARTNER_ADMIN"}})
     assert r.status_code == 200
-    events, name = [], None
-    for line in r.text.splitlines():
-        if line.startswith("event: "):
-            name = line[7:].strip()
-        elif line.startswith("data: ") and name:
-            events.append((name, json.loads(line[6:])))
-    assert events[-1][0] == "done"
-    blocks = [d for n, d in events if n == "block"]
+    answer = r.json()
+    blocks = answer["blocks"]
     routed = next((b["meta"].get("match") for b in blocks if b["type"] == "capability"), None)
-    return events[0][1]["sessionId"], routed, blocks[-1]["content"] if blocks else ""
+    return answer["sessionId"], routed, blocks[-1]["content"] if blocks else ""
 
 
 # ── across users ─────────────────────────────────────────────────────────

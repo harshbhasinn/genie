@@ -37,13 +37,13 @@ def client():
 
 
 def events(response) -> list[tuple[str, dict]]:
-    out, name = [], None
-    for line in response.text.splitlines():
-        if line.startswith("event: "):
-            name = line[7:].strip()
-        elif line.startswith("data: ") and name:
-            out.append((name, json.loads(line[6:])))
-    return out
+    """The answer as (kind, data) pairs in order - "start" (the ids), each "block", "done" -
+    built from the one JSON response, so the assertions below read the same either way."""
+    body = response.json()
+    return ([("start", {k: body[k] for k in ("sessionId", "turnId", "mode")})]
+            + [("block", b) for b in body["blocks"]]
+            + [("done", {"turnId": body["turnId"], "latencyMs": body["latencyMs"],
+                         "blocks": len(body["blocks"])})])
 
 
 def test_health_reports_real_state(client):
@@ -54,13 +54,15 @@ def test_health_reports_real_state(client):
     assert "gemini_api_key" not in json.dumps(body).lower()  # no secret leaks
 
 
-def test_stream_is_well_formed(client):
+def test_the_answer_is_one_json_response(client):
     r = client.post("/v1/genie/chat", json={
         "message": "what is my wallet balance",
         "uiContext": {"screen": "command_centre", "role": "AD_PARTNER_ADMIN"},
     })
     assert r.status_code == 200
-    assert r.headers["content-type"].startswith("text/event-stream")
+    assert r.headers["content-type"].startswith("application/json")
+    assert set(r.json()) == {"sessionId", "turnId", "mode", "blocks", "latencyMs"}
+    assert all(b["type"] != "token" for b in r.json()["blocks"])     # the text block has it all
 
     evs = events(r)
     assert evs[0][0] == "start"
