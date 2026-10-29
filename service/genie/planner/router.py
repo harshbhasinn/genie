@@ -1,11 +1,9 @@
-"""POST /v1/genie/plan — the campaign calculator. SSE, like chat:
+"""POST /v1/genie/plan - the campaign calculator. One request in, one JSON answer out:
 
-    event: start    {"requestId"}
-    event: result   {"status", "window", "dayparts", "notices", "solver", ...}
-    event: plan     one per plan: plan 1, then any alternatives asked for
-    event: notice   {"code", "text"}            something found while finding alternatives
-    event: done     {"requestId", "latencyMs", "plans"}
-    event: error    {"code", "message", "retryable"}   then done
+    200  {"requestId", "status", "window", "dayparts", "imageSlots", "videoSlots",
+          "advertisedBrandId", "budget", "target", "reachVersion", "notices": [{code, text}],
+          "plans": [plan 1, then any alternatives asked for], "solver", "latencyMs"}
+    4xx / 5xx  {"code", "message", "retryable"} (+ Retry-After when waiting helps)
 
 A plan is a campaign as Adgrid books it (CAMPAIGN_CREATION_GUIDE.md §7.6): how many screens
 per city x shop type, for the whole window and every chosen daypart. Its price is the
@@ -13,10 +11,10 @@ QUOTE from simulate-cost - surcharge days and billing's rounding included - so i
 price the wizard will show. A plan whose quote is over the budget is never shown: Genie
 solves again under a tighter cap (at most three times).
 
-Everything that can be refused is refused BEFORE the stream starts, as a plain HTTP error
-with a code: bad input (422), signed out (401), no access (403), too many (429), busy or the
-backend down (503), a backend response that breaks the contract (502). Plan 1 is solved and
-priced before the stream starts too, so the stream opens with an answer.
+A 200 always carries a `status`; a status without a plan (NO_INVENTORY, BUDGET_TOO_LOW...)
+has an empty `plans` and a notice saying why. Everything else is refused with a code: bad
+input (422), signed out (401), no access (403), too many (429), busy or the backend down
+(503), a backend response that breaks the contract (502).
 
 The partner is never taken from the request: it is the verified user's own (a `clientId`
 hint is accepted only if it is one of that user's grants).
@@ -28,18 +26,17 @@ import dataclasses
 import logging
 import time
 import uuid
-from collections.abc import AsyncIterator
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Literal
 
 from fastapi import APIRouter, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..auth.caller import identity_for, is_local_without_bff, owner_for, token_for
 from ..bff import BffError
-from ..wire import sse as _sse
+from ..wire import refuse, reply
 from . import model
 from .contract import DAYPARTS, ContractError, PlanQuery
 from .engine import PlanMixUp, Planner, PlannerRefused, PlanUnavailable, prepare
@@ -76,10 +73,7 @@ class PlanIn(BaseModel):
     client_id: str | None = Field(default=None, alias="clientId", max_length=100)
 
 
-def _fail(status: int, code: str, message: str, *, retry_after: int | None = None) -> JSONResponse:
-    headers = {"Retry-After": str(retry_after)} if retry_after else None
-    return JSONResponse({"code": code, "message": message, "retryable": status in (429, 503)},
-                        status_code=status, headers=headers)
+_fail = refuse                       # one refusal shape for both endpoints (wire.py)
 
 
 def _bff_failure(err: BffError, what: str) -> JSONResponse:
@@ -195,7 +189,6 @@ async def plan(req: PlanIn, request: Request):
             cap = min(cap - 30, cap * budget_paise // int(quote * 100))
         return {**out, "status": QUOTE_OVER_BUDGET, "plans": []}, None, problem
 
-    handed_off = False              # once the stream owns the claim, the stream releases it
     try:
         reads = await asyncio.gather(inputs.availability(token, owner, client_id, q),
                                      inputs.rate_cards(token, owner, client_id, brand),
@@ -219,93 +212,80 @@ async def plan(req: PlanIn, request: Request):
                          retry_after=2)
         except PlanMixUp:
             return _fail(500, "PLAN_REFUSED", "Genie refused a result it couldn't verify. Try again.")
-        handed_off = True
+
+        found_notices = notices(first, prep, q, budget=req.budget, target=req.target)
+        if first["status"] == QUOTE_OVER_BUDGET:
+            found_notices.append({"code": QUOTE_OVER_BUDGET,
+                                  "text": "With surcharge days, no plan Genie found fits the budget. "
+                                          "Try a slightly bigger budget."})
+        plans = []
+        if first["plans"]:
+            plan1 = first["plans"][0]
+            plans.append(plan_json(1, plan1, prep, q, budget=req.budget, quote=first_quote,
+                                   status=first["status"], target=req.target, brand_id=brand))
+            if req.alternatives:
+                plans += await _alternatives(planner, problem, first, plan1, first_quote, prep, q,
+                                             req, brand, quote_of, found_notices,
+                                             cfg.genie_plan_alternatives_within_pct)
     except _Refused as refused:
         return refused.response
     except ContractError as err:
         log.error("planning data broke the contract: %s", err)
         return _fail(502, "BAD_BACKEND_DATA",
                      "The screen or price data didn't match what Genie expects, so no plan was made.")
+    except Exception:  # noqa: BLE001 - one refusal shape, always; the details go to the log
+        log.exception("plan %s failed", request_id)
+        return _fail(500, "INTERNAL_ERROR", "Genie couldn't finish this plan. Try again.")
     finally:
-        if not handed_off:
-            planner.release(owner)
+        planner.release(owner)
 
-    log.info("plan %s: %d cells, status %s, %s ms, %s solves", request_id,
-             len(prep.problem.cells), first["status"], first["ms"], first["solves"])
-    counted = {"plans": 0}
-    within = cfg.genie_plan_alternatives_within_pct
+    elapsed = int((time.perf_counter() - started) * 1000)
+    log.info("plan %s: %d cells, status %s, %d plans, %s ms solving, %s ms in all", request_id,
+             len(prep.problem.cells), first["status"], len(plans), first["ms"], elapsed)
+    return reply({
+        "request_id": request_id, "status": first["status"],
+        "window": {"from": start.isoformat(), "to": end.isoformat(), "days": days},
+        "dayparts": list(q.dayparts), "image_slots": q.image_slots, "video_slots": q.video_slots,
+        "advertised_brand_id": brand, "budget": str(req.budget.quantize(Decimal("0.01"))),
+        "target": req.target, "reach_version": reach.version, "notices": found_notices,
+        "plans": plans,
+        "solver": {"ms": first["ms"], "solves": first["solves"],
+                   "tie_break_finished": first.get("tiebreaks_unfinished", 0) == 0},
+        "latency_ms": elapsed})
 
-    async def events() -> AsyncIterator[str]:
-        found_notices = notices(first, prep, q, budget=req.budget, target=req.target)
-        if first["status"] == QUOTE_OVER_BUDGET:
-            found_notices.append({"code": QUOTE_OVER_BUDGET,
-                                  "text": "With surcharge days, no plan Genie found fits the budget. "
-                                          "Try a slightly bigger budget."})
-        yield _sse("start", {"request_id": request_id})
-        yield _sse("result", {
-            "status": first["status"],
-            "window": {"from": start.isoformat(), "to": end.isoformat(), "days": days},
-            "dayparts": list(q.dayparts), "imageSlots": q.image_slots, "videoSlots": q.video_slots,
-            "advertisedBrandId": brand, "budget": str(req.budget.quantize(Decimal("0.01"))),
-            "target": req.target, "reachVersion": reach.version, "notices": found_notices,
-            "solver": {"ms": first["ms"], "solves": first["solves"],
-                       "tieBreakFinished": first.get("tiebreaks_unfinished", 0) == 0}})
-        if not first["plans"]:
-            return
-        plan1 = first["plans"][0]
-        yield _sse("plan", plan_json(1, plan1, prep, q, budget=req.budget, quote=first_quote,
-                                     status=first["status"], target=req.target, brand_id=brand))
-        counted["plans"] = 1
-        if not req.alternatives or await request.is_disconnected():
-            return
-        alt = model.Alternatives(mode=first["mode"], shown=(tuple(plan1["groups"]),),
-                                 cost30=plan1["cost30"], reach=plan1["reach"],
-                                 count=req.alternatives, within_pct=within)
+
+async def _alternatives(planner, problem, first, plan1, first_quote, prep, q, req, brand,
+                        quote_of, found_notices, within) -> list[dict]:
+    """Up to `req.alternatives` more plans, each priced; one over budget once priced is left
+    out. A failure here never costs plan 1: it becomes a notice."""
+    alt = model.Alternatives(mode=first["mode"], shown=(tuple(plan1["groups"]),),
+                             cost30=plan1["cost30"], reach=plan1["reach"],
+                             count=req.alternatives, within_pct=within)
+    try:
+        more = await planner.solve(problem, alt)
+    except (PlanUnavailable, PlanMixUp):
+        found_notices.append({"code": "ALTERNATIVES_FAILED",
+                              "text": "Genie couldn't work out alternatives just now."})
+        return []
+    out, over = [], 0
+    for found in more["plans"]:
         try:
-            more = await planner.solve(problem, alt)
-        except (PlanUnavailable, PlanMixUp) as err:
-            yield _sse("error", {"code": "ALTERNATIVES_FAILED", "message": str(err), "retryable": True})
-            return
-        over = 0
-        for found in more["plans"]:
             quote = await quote_of(found)
-            if quote > req.budget:
-                over += 1
-                continue
-            counted["plans"] += 1
-            yield _sse("plan", plan_json(counted["plans"], found, prep, q, budget=req.budget,
-                                         quote=quote, status=first["status"], target=req.target,
-                                         brand_id=brand, first=plan1, first_quote=first_quote))
-        if more["cut_short"]:
-            yield _sse("notice", {"code": "ALTERNATIVES_CUT_SHORT",
-                                  "text": "Genie ran out of time looking for more alternatives."})
-        elif counted["plans"] - 1 < req.alternatives:
-            text = f"No other mix of cities comes within {within}% of plan 1"
-            text += " and the budget, once surcharge days are priced." if over else "."
-            yield _sse("notice", {"code": "NO_MORE_ALTERNATIVES", "text": text})
-
-    async def stream() -> AsyncIterator[str]:
-        try:
-            try:
-                async for chunk in events():
-                    yield chunk
-            except _Refused as refused:              # a quote refused part-way (alternatives)
-                body = refused.response.body.decode()
-                log.warning("plan %s: an alternative could not be priced: %s", request_id, body)
-                yield _sse("error", {"code": "ALTERNATIVES_FAILED",
-                                     "message": "Genie couldn't price the alternatives.",
-                                     "retryable": True})
-            except Exception:  # noqa: BLE001 - the stream must not end without saying so
-                log.exception("plan %s failed part-way", request_id)
-                yield _sse("error", {"code": "INTERNAL_ERROR",
-                                     "message": "Genie couldn't finish this plan. Try again.",
-                                     "retryable": True})
-            yield _sse("done", {"request_id": request_id, "plans": counted["plans"],
-                                "latency_ms": int((time.perf_counter() - started) * 1000)})
-        finally:
-            planner.release(owner)      # however the stream ends, including a closed tab
-
-    return StreamingResponse(
-        stream(), media_type="text/event-stream; charset=utf-8",
-        headers={"Cache-Control": "no-cache", "Connection": "keep-alive",
-                 "X-Accel-Buffering": "no"})
+        except _Refused:
+            found_notices.append({"code": "ALTERNATIVES_FAILED",
+                                  "text": "Genie couldn't price the alternatives just now."})
+            return out
+        if quote > req.budget:
+            over += 1
+            continue
+        out.append(plan_json(len(out) + 2, found, prep, q, budget=req.budget, quote=quote,
+                             status=first["status"], target=req.target, brand_id=brand,
+                             first=plan1, first_quote=first_quote))
+    if more["cut_short"]:
+        found_notices.append({"code": "ALTERNATIVES_CUT_SHORT",
+                              "text": "Genie ran out of time looking for more alternatives."})
+    elif len(out) < req.alternatives:
+        text = f"No other mix of cities comes within {within}% of plan 1"
+        text += " and the budget, once surcharge days are priced." if over else "."
+        found_notices.append({"code": "NO_MORE_ALTERNATIVES", "text": text})
+    return out

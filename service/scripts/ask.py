@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
-"""Talk to a running Genie. Shows the stream arriving, not a buffered blob.
+"""Talk to a running Genie and print its answer, block by block.
 
     python scripts/ask.py "what is my wallet balance"
     python scripts/ask.py "what is my wallet balance" --screen wallet_management
     python scripts/ask.py "pause this campaign" --screen campaign_detail
     python scripts/ask.py --chat                 # interactive, keeps the session
 
-Works the same in PowerShell and bash, which `curl` does not: in PowerShell
-`curl` is an alias for Invoke-WebRequest, which buffers the whole response and
-hides the one thing worth watching.
+Works the same in PowerShell and bash, which `curl` does not (in PowerShell `curl` is
+an alias for Invoke-WebRequest).
 """
 from __future__ import annotations
 
@@ -34,69 +33,41 @@ def turn(client: httpx.Client, base: str, message: str, *, screen: str | None,
         body["uiContext"] = {"screen": screen, "role": role}
 
     started = time.perf_counter()
-    first_token_at: float | None = None
-    event = None
-    new_session = session_id
-
     try:
-        with client.stream("POST", f"{base}/v1/genie/chat", json=body) as resp:
-            if resp.status_code != 200:
-                raw_body = resp.read().decode(errors="replace")
-                print(f"{RED}HTTP {resp.status_code}{RESET} {raw_body[:400]}")
-                return session_id
-            for line in resp.iter_lines():
-                if raw:
-                    print(line)
-                    continue
-                if line.startswith("event: "):
-                    event = line[7:].strip()
-                    continue
-                if not line.startswith("data: "):
-                    continue
-                data = json.loads(line[6:])
-
-                if event == "start":
-                    new_session = data["sessionId"]
-                    print(f"{DIM}session {new_session[:8]} · responder={data['mode']}{RESET}")
-                elif event == "block":
-                    kind = data["type"]
-                    if kind == "token":
-                        if first_token_at is None:
-                            first_token_at = time.perf_counter()
-                        print(data["content"], end="", flush=True)
-                    elif kind == "capability":
-                        meta = data.get("meta") or {}
-                        otp = f" {YELLOW}[OTP-gated]{RESET}" if meta.get("otpGated") else ""
-                        print(f"{GREEN}▸ {data['content']}{RESET} "
-                              f"{DIM}({meta.get('mode')}){RESET}{otp}")
-                        if meta.get("follow_ups"):
-                            print(f"{DIM}  will ask: {', '.join(meta['follow_ups'])}{RESET}")
-                    elif kind == "follow_up":
-                        # Was silently dropped: the turn showed "2 blocks" and no
-                        # visible answer, because the one thing it produced was
-                        # the question nobody rendered.
-                        print(f"{YELLOW}? {data['content']}{RESET}")
-                        for opt in (data.get("meta") or {}).get("options") or []:
-                            hint = f"  {DIM}— {opt['hint']}{RESET}" if opt.get("hint") else ""
-                            print(f"    · {BOLD}{opt['label']}{RESET}{hint}")
-                    elif kind in ("definition", "formula", "caveat", "unavailable",
-                                  "refusal", "denied", "navigate", "capability_blocked",
-                                  "screen", "actions", "metric_list", "unavailable_list",
-                                  "can", "navigate_offer"):
-                        print(f"{DIM}[{kind}]{RESET} {data['content'][:160]}")
-                    elif kind == "error":
-                        print(f"\n{RED}error{RESET} {data['content']}")
-                    elif kind == "text":
-                        pass  # already streamed as tokens
-                elif event == "done":
-                    total = int((time.perf_counter() - started) * 1000)
-                    ttft = (f" · first token {int((first_token_at - started) * 1000)}ms"
-                            if first_token_at else "")
-                    print(f"\n{DIM}{data['blocks']} blocks · {total}ms{ttft}{RESET}\n")
+        resp = client.post(f"{base}/v1/genie/chat", json=body)
     except httpx.ConnectError:
         print(f"{RED}Cannot reach {base}{RESET}\n"
               f"  Start it:  cd service && python -m uvicorn genie.main:app --port 9030")
         sys.exit(1)
+    if raw:
+        print(json.dumps(resp.json(), indent=2, ensure_ascii=False))
+        return resp.json().get("sessionId", session_id)
+    if resp.status_code != 200:
+        print(f"{RED}HTTP {resp.status_code}{RESET} {resp.text[:400]}")
+        return session_id
+
+    answer = resp.json()
+    new_session = answer["sessionId"]
+    print(f"{DIM}session {new_session[:8]} · responder={answer['mode']}{RESET}")
+    for data in answer["blocks"]:
+        kind = data["type"]
+        if kind == "capability":
+            meta = data.get("meta") or {}
+            otp = f" {YELLOW}[OTP-gated]{RESET}" if meta.get("otpGated") else ""
+            print(f"{GREEN}▸ {data['content']}{RESET} {DIM}({meta.get('mode')}){RESET}{otp}")
+        elif kind == "follow_up":
+            print(f"{YELLOW}? {data['content']}{RESET}")
+            for opt in (data.get("meta") or {}).get("options") or []:
+                hint = f"  {DIM}— {opt['hint']}{RESET}" if opt.get("hint") else ""
+                print(f"    · {BOLD}{opt['label']}{RESET}{hint}")
+        elif kind == "text":
+            print(data["content"])
+        elif kind == "error":
+            print(f"{RED}error{RESET} {data['content']}")
+        else:
+            print(f"{DIM}[{kind}]{RESET} {data['content'][:160]}")
+    total = int((time.perf_counter() - started) * 1000)
+    print(f"\n{DIM}{len(answer['blocks'])} blocks · {total}ms{RESET}\n")
     return new_session
 
 
@@ -107,7 +78,7 @@ def main() -> int:
     ap.add_argument("--role", default="AD_PARTNER_ADMIN")
     ap.add_argument("--base", default="http://127.0.0.1:9030")
     ap.add_argument("--chat", action="store_true", help="interactive, keeps the session")
-    ap.add_argument("--raw", action="store_true", help="print the SSE frames verbatim")
+    ap.add_argument("--raw", action="store_true", help="print the JSON answer verbatim")
     args = ap.parse_args()
 
     if not args.message and not args.chat:

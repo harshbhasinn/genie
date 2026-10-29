@@ -45,7 +45,7 @@ one *is* and can explain it precisely while being structurally unable to call it
 ## Layout
 
 ```
-service/           the FastAPI app — chat, SSE, the Gemini adapter, the loader
+service/           the FastAPI app — chat, the calculator, the Gemini adapter, the loader
 ontology/          12 screens · 94 metrics · 20 form fields · 5 approval transitions
   schema/          JSON Schema the screens are validated against
   screens/         one YAML per dashboard screen — the backbone

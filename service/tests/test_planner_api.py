@@ -128,14 +128,10 @@ def install(source, planner: Planner | None = None, *, env: str = "local", bff: 
     return app.state
 
 
-def events(text: str) -> list[tuple[str, dict]]:
-    out, name = [], None
-    for line in text.splitlines():
-        if line.startswith("event: "):
-            name = line[7:]
-        elif line.startswith("data: "):
-            out.append((name, json.loads(line[6:])))
-    return out
+def result(r: httpx.Response) -> dict:
+    """The calculator's one JSON answer."""
+    assert r.headers["content-type"].startswith("application/json"), r.text[:200]
+    return r.json()
 
 
 async def post(c: httpx.AsyncClient, token: str | None, payload: dict) -> httpx.Response:
@@ -157,7 +153,7 @@ def one(token, payload):
 
 
 def plans_of(r: httpx.Response) -> list[dict]:
-    return [d for e, d in events(r.text) if e == "plan"]
+    return result(r)["plans"]
 
 
 # ── end to end, on the demo data ──────────────────────────────────────────────
@@ -166,10 +162,12 @@ def test_a_plan_is_a_campaign_the_wizard_can_book():
     install(ScopedSource())
     r = one(TOKENS[0], body())
     assert r.status_code == 200
-    assert [e for e, _ in events(r.text)] == ["start", "result", "plan", "done"]
-    result = dict(events(r.text))["result"]
-    assert result["status"] == "TARGET_MET" and result["notices"] == []
-    assert result["dayparts"] == ["MORNING", "EVENING"] and result["reachVersion"] == "demo-reach-1"
+    answer = result(r)
+    assert set(answer) == {"requestId", "status", "window", "dayparts", "imageSlots", "videoSlots",
+                           "advertisedBrandId", "budget", "target", "reachVersion", "notices",
+                           "plans", "solver", "latencyMs"}
+    assert answer["status"] == "TARGET_MET" and answer["notices"] == [] and len(answer["plans"]) == 1
+    assert answer["dayparts"] == ["MORNING", "EVENING"] and answer["reachVersion"] == "demo-reach-1"
     p1 = plans_of(r)[0]
     # 5 Delhi grocery screens: (3x900 + 2x1,600 + 3x1,000 + 2x1,800) / 30 x 15 = Rs 6,250 each,
     # reach (90 + 120) x 15 = 3,150 each - the cheapest way to 15,000 (checked by brute force
@@ -212,9 +210,9 @@ def test_the_quote_is_the_price_and_a_plan_over_budget_is_never_shown():
     source = ScopedSource(surcharge=Decimal("2.9"))
     install(source)
     r = one(TOKENS[0], body(target=None, budget="7000"))
-    result = dict(events(r.text))["result"]
-    assert result["status"] == "QUOTE_OVER_BUDGET" and plans_of(r) == []
-    assert "QUOTE_OVER_BUDGET" in {n["code"] for n in result["notices"]}
+    answer = result(r)
+    assert answer["status"] == "QUOTE_OVER_BUDGET" and plans_of(r) == []
+    assert "QUOTE_OVER_BUDGET" in {n["code"] for n in answer["notices"]}
 
 
 @pytest.mark.parametrize("factor", ["5", "0.2", "180"])
@@ -444,8 +442,8 @@ def test_cells_without_a_price_are_left_out_and_the_user_is_told():
         return data
     install(ScopedSource(mutate=no_delhi_grocery))
     r = one(TOKENS[0], body())
-    result = dict(events(r.text))["result"]
-    assert {n["code"] for n in result["notices"]} == {"LINES_SKIPPED_NO_RATE"}
+    answer = result(r)
+    assert {n["code"] for n in answer["notices"]} == {"LINES_SKIPPED_NO_RATE"}
     assert all(ln["city"] != "DEL" or ln["shopType"] != "GROCERY" for ln in plans_of(r)[0]["lines"])
 
 
@@ -463,8 +461,8 @@ def test_a_start_date_with_every_daypart_over_is_refused_with_the_earliest_start
 def test_no_free_screens_is_a_clear_answer():
     install(ScopedSource())
     r = one(TOKENS[0], body(cities=["BLR"]))
-    result = dict(events(r.text))["result"]
-    assert result["status"] == "NO_INVENTORY" and plans_of(r) == []
+    answer = result(r)
+    assert answer["status"] == "NO_INVENTORY" and plans_of(r) == []
 
 
 def test_the_calculator_says_when_it_is_not_connected():

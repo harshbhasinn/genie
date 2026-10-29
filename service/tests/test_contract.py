@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 
 from genie.config import Settings
 from genie.main import app
-from .test_planner_api import TOKENS, ScopedSource, body, events, install, one
+from .test_planner_api import TOKENS, ScopedSource, body, install, one, result
 
 
 def test_a_malformed_request_has_the_common_error_shape_and_echoes_nothing():
@@ -41,24 +41,24 @@ def test_the_calculator_takes_one_spelling_per_field():
 def test_money_is_always_to_the_paisa():
     install(ScopedSource())
     r = one(TOKENS[0], body(budget=35000.5, target=None))
-    result = dict(events(r.text))["result"]
-    plan = [d for e, d in events(r.text) if e == "plan"][0]
-    assert result["budget"] == "35000.50"
+    answer = result(r)
+    plan = answer["plans"][0]
+    assert answer["budget"] == "35000.50"
     assert plan["budgetLeft"] == "825.50" and plan["cost"] == "34175.00"
     assert all(ln["listCost"].count(".") == 1 and len(ln["listCost"].split(".")[1]) == 2
                for ln in plan["lines"])
 
 
-def test_a_plan_that_fails_part_way_still_ends_with_error_then_done(monkeypatch):
+def test_a_plan_that_fails_is_a_coded_500_without_internals(monkeypatch):
     def broken(*a, **kw):
         raise RuntimeError("secret internal detail")
     monkeypatch.setattr("genie.planner.router.plan_json", broken)
     install(ScopedSource())
     r = one(TOKENS[0], body())
-    names = [e for e, _ in events(r.text)]
-    assert names[-2:] == ["error", "done"]
-    err = dict(events(r.text))["error"]
-    assert err["code"] == "INTERNAL_ERROR" and "secret" not in r.text
+    assert r.status_code == 500
+    assert r.json() == {"code": "INTERNAL_ERROR", "message": "Genie couldn't finish this plan. Try again.",
+                        "retryable": True}
+    assert "secret" not in r.text
     assert app.state.planner.in_flight == 0
 
 
@@ -71,11 +71,9 @@ def test_a_chat_turn_that_fails_says_so_without_internals(monkeypatch):
             yield  # pragma: no cover
         monkeypatch.setattr(app.state.responder, "respond", boom)
         r = c.post("/v1/genie/chat", json={"message": "hello"})
-    names = [e for e, _ in events(r.text)]
-    assert names[0] == "start" and names[-2:] == ["error", "done"]
-    err = dict(events(r.text))["error"]
-    assert err == {"code": "INTERNAL_ERROR", "message": "Genie couldn't finish this answer. Try again.",
-                   "retryable": True}
+    assert r.status_code == 500
+    assert r.json() == {"code": "INTERNAL_ERROR", "message": "Genie couldn't finish this answer. Try again.",
+                        "retryable": True}
     assert "KeyError" not in r.text and "GENIE_INTERNAL_THING" not in r.text
 
 
@@ -114,8 +112,8 @@ def _keys(value, path=""):
             yield from _keys(v, f"{path}[{i}]")
 
 
-def _snake(stream_text: str) -> list[str]:
-    return [where for _, data in events(stream_text) for k, where in _keys(data) if "_" in k]
+def _snake(response) -> list[str]:
+    return [where for k, where in _keys(response.json()) if "_" in k]
 
 
 def test_chat_refuses_the_old_snake_case_spellings():
@@ -150,7 +148,7 @@ def test_every_golden_question_streams_camel_case_keys_only():
                        json={"message": q["query"],
                              "uiContext": {k: v for k, v in ctx.items() if k in ("screen", "role")}})
             assert r.status_code == 200, q["id"]
-            found += [f"{q['id']}: {w}" for w in _snake(r.text)]
+            found += [f"{q['id']}: {w}" for w in _snake(r)]
     assert not found, found[:10]
 
 
@@ -159,4 +157,4 @@ def test_every_calculator_event_is_camel_case():
     for payload in (body(alternatives=2), body(target=None, alternatives=2),
                     body(budget="100", target=None), body(target=10 ** 7)):
         r = one(TOKENS[0], payload)
-        assert r.status_code == 200 and not _snake(r.text), _snake(r.text)
+        assert r.status_code == 200 and not _snake(r), _snake(r)
